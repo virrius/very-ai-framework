@@ -34,6 +34,8 @@ jobs:
     permissions:
       pull-requests: write
       contents: read
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,14 +43,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install openai
       - name: Codex review
-        run: python .github/scripts/codex_review.py
+        if: env.OPENAI_API_KEY != ''
+        run: |
+          pip install openai
+          python .github/scripts/codex_review.py
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_MODEL: gpt-4o-mini
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           BASE_REF: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - name: Skip notice
+        if: env.OPENAI_API_KEY == ''
+        run: echo "OPENAI_API_KEY не задан — Codex review пропущен (job зелёный)."
