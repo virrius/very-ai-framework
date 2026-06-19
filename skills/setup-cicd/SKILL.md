@@ -47,8 +47,9 @@ description: >
 ## Шаг 3. Настроить GitHub
 
 1. **Environments** (Settings → Environments): создать `dev` и `prod` (и др. при нужде).
-2. **Secrets на каждый environment:** `SSH_HOST`, `SSH_USER`, `SSH_KEY` (приватный
-   deploy-ключ; публичный — в `~/.ssh/authorized_keys` сервера).
+2. **На каждый environment:**
+   - Variables: `SSH_HOST`, `SSH_USER` (адрес/юзер — не секрет; видно, какой сервер к стенду);
+   - Secret: `SSH_KEY` (приватный deploy-ключ; публичный — в `~/.ssh/authorized_keys` сервера).
 3. **Конфиг приложения:** Variable `APP_DOTENV` (многострочный `.env`) на каждый
    environment; секретные значения — отдельными Environment Secrets (напр. `APP_SECRET`).
 4. **(опц.) @claude:** Secret `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`) +

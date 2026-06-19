@@ -33,8 +33,11 @@
 ## Секреты и конфиг
 
 - **Никогда** не коммить ключи/токены/`.env` с секретами в репозиторий.
-- Несекретный конфиг → **Environment Variables** (вся `.env` в `APP_DOTENV`).
-- Секреты → **Environment Secrets** (`SSH_KEY`, `APP_SECRET`, …).
+- Несекретный конфиг → **Environment Variables**: `SSH_HOST`, `SSH_USER`
+  (видно, какой сервер к какому стенду), вся `.env` в `APP_DOTENV`.
+- Секреты → **Environment Secrets**: `SSH_KEY`, `APP_SECRET`, … (всё, что даёт доступ).
+- Принцип: секрет — только то, что **открывает доступ**; адреса/имена — это конфиг
+  (Variables). Помни: Variables видны в логах, Secrets маскируются.
 - Новый параметр приложения — добавь строку в `APP_DOTENV` нужного окружения (через UI),
   без правок workflow. Новый секрет — Environment Secret + одна строка в шаге сборки `app.env`.
 
