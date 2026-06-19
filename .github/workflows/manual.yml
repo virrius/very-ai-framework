@@ -78,7 +78,7 @@ jobs:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.yml,scripts/deploy.sh,app.env"
+          source: "docker-compose.yml,.github/scripts/deploy.sh,app.env"
           target: "/srv/deploy/${{ inputs.environment }}"
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -91,5 +91,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
           script: >
-            bash /srv/deploy/${{ inputs.environment }}/scripts/deploy.sh
+            bash /srv/deploy/${{ inputs.environment }}/.github/scripts/deploy.sh
             ${{ inputs.environment }} ${{ github.repository }} ${{ needs.build.outputs.tag }} "${{ inputs.service }}"

@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: s
-        run: echo "services=$(bash scripts/services.sh list)" >> "$GITHUB_OUTPUT"
+        run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
 
   build:
     needs: discover
@@ -67,7 +67,7 @@ jobs:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.yml,scripts/deploy.sh,app.env"
+          source: "docker-compose.yml,.github/scripts/deploy.sh,app.env"
           target: "/srv/deploy/prod"
 
       - name: Deploy all services to prod
@@ -80,4 +80,4 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
-          script: bash /srv/deploy/prod/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}
+          script: bash /srv/deploy/prod/.github/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}

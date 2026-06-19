@@ -17,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
       - id: c
-        run: echo "services=$(bash scripts/services.sh changed ${{ github.event.before }} ${{ github.sha }})" >> "$GITHUB_OUTPUT"
+        run: echo "services=$(bash .github/scripts/services.sh changed ${{ github.event.before }} ${{ github.sha }})" >> "$GITHUB_OUTPUT"
 
   build:
     needs: changed
@@ -70,7 +70,7 @@ jobs:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.yml,scripts/deploy.sh,app.env"
+          source: "docker-compose.yml,.github/scripts/deploy.sh,app.env"
           target: "/srv/deploy/dev"
 
       - name: Deploy changed services to dev
@@ -84,5 +84,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
           script: >
-            bash /srv/deploy/dev/scripts/deploy.sh dev ${{ github.repository }} ${{ github.sha }}
+            bash /srv/deploy/dev/.github/scripts/deploy.sh dev ${{ github.repository }} ${{ github.sha }}
             "${{ join(fromJson(needs.changed.outputs.services), ' ') }}"

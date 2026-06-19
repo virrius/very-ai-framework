@@ -64,10 +64,9 @@ description: >
 TEMPLATE=https://github.com/virrius/ai-framework-cicd   # или переданный URL
 git clone --depth 1 "$TEMPLATE" /tmp/cicd-template
 
-mkdir -p .github/workflows .github/scripts scripts
+mkdir -p .github/workflows .github/scripts
 cp /tmp/cicd-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
-cp /tmp/cicd-template/.github/scripts/codex_review.py .github/scripts/
-cp /tmp/cicd-template/scripts/{services.sh,deploy.sh} scripts/
+cp /tmp/cicd-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
 cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
 cp /tmp/cicd-template/docker-compose.yml .   # шаблон — переписать под свои сервисы
 ```
