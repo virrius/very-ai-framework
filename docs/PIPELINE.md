@@ -197,12 +197,12 @@ permissions:
 
 ## 4. merge → main → dev
 
-**Когда:** merge в `main`.
+**Когда:** push/merge в `main`.
 **Цель:** автодеплой на dev-стенд.
 
-- `detect-changes` определяет затронутые сервисы
-- собираются и пушатся в registry **только изменённые образы**
-- деплой изменённых сервисов на **dev**
+- `detect-changes` (paths-filter) определяет затронутые сервисы
+- собираются и пушатся в GHCR **только изменённые образы**, тег = short SHA
+- деплой **только изменённых** сервисов на **dev** (порт api 8080)
 
 ---
 
@@ -211,8 +211,8 @@ permissions:
 **Когда:** проставление релиз-тега `v*`.
 **Цель:** деплой на прод.
 
-- сборка **всех** образов с тегом релиза
-- деплой на **prod**
+- сборка **всех** образов с тегом релиза (`:v0.1.0` + `:stable`)
+- деплой **всех** сервисов на **prod** (порт api 8090)
 
 ---
 
@@ -232,6 +232,26 @@ permissions:
 
 - Стенды живут в **Settings → Environments** (dev, prod, и любые другие).
 - На каждый стенд — секреты `SSH_HOST`, `SSH_USER`, `SSH_KEY`.
-- Деплой: SSH на сервер → `docker compose pull && docker compose up -d`.
 - Список стендов нигде не захардкожен — добавляешь environment в Settings,
   ручной воркфлоу деплоит туда без правок кода.
+
+### Механизм деплоя
+
+Вся логика — в `scripts/deploy.sh` (не bash-простыня в yaml). Каждый deploy-job:
+
+1. `actions/checkout` → `appleboy/scp-action` копирует `docker-compose.yml` +
+   `scripts/deploy.sh` в `/srv/deploy/<env>/` на сервере;
+2. `appleboy/ssh-action` запускает `deploy.sh <env> <owner/repo> <tag> [services]`.
+
+`deploy.sh`:
+- `docker login ghcr.io` кредами из `GHCR_USER`/`GHCR_TOKEN` (= `GITHUB_TOKEN`) —
+  образы приватные;
+- изоляция стендов на одном хосте: `COMPOSE_PROJECT_NAME=afc_<env>` + свой
+  `API_PORT` (dev 8080, prod 8090);
+- `docker compose pull/up -d` для нужных сервисов (пусто/`all` = все).
+
+**Имена образов:** build и compose используют один префикс
+`ghcr.io/<owner/repo>/<service>` — иначе compose не найдёт собранный образ.
+
+> Прим.: в текущем демо один сервер эмулирует и dev, и prod (разные порты/проекты).
+> В реале — разные хосты, адреса в секретах соответствующих environment.
