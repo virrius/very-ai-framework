@@ -61,7 +61,7 @@ jobs:
             echo "codex exec failed:"; cat "/tmp/codex_err_${PR}.log"; exit 1;
           }
           {
-            echo "🤖 **Codex review** — подписка ChatGPT, self-hosted runner"
+            echo "🤖 **Codex review**"
             echo
             cat "/tmp/review_${PR}.md"
           } > "/tmp/comment_${PR}.md"
