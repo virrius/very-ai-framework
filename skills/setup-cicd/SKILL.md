@@ -68,7 +68,6 @@ mkdir -p .github/workflows .github/scripts
 cp /tmp/cicd-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
 cp /tmp/cicd-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
 cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
-cp /tmp/cicd-template/docker-compose.example.yml .   # образец контракта
 ```
 
 **Правила разработки** — в шаблоне они в `AGENTS.md`, но целевой репо может
@@ -84,10 +83,10 @@ cp /tmp/cicd-template/docker-compose.example.yml .   # образец контр
 ## Шаг 2. Привести проект к контракту
 
 - Каждый сервис — каталог `services/<имя>/` с `Dockerfile`.
-- **`docker-compose.yml`** — у проекта свой. Если его нет — сделай из
-  `docker-compose.example.yml`; если есть — не затирай, приведи к контракту:
-  образ `ghcr.io/${GITHUB_REPOSITORY}/<svc>:${TAG}` и `env_file: .env`
-  (этот `.env` собирает деплой из Environments — руками не коммить).
+- **`docker-compose.yml`** — проект пишет свой, мы его из шаблона **не копируем**.
+  Он должен лишь соответствовать контракту: образ `ghcr.io/${GITHUB_REPOSITORY}/<svc>:${TAG}`
+  и `env_file: .env` (этот `.env` собирает деплой из Environments — руками не коммить).
+  Образец для ориентира — `docker-compose.example.yml` в репозитории-шаблоне.
 - Тесты: `tests/unit` (быстрые), тяжёлые — пометить `@pytest.mark.heavy`.
 - Если проект не на Python — заменить в `feature.yml`/`pr.yml` шаги ruff/pytest/pip-audit
   на тулинг проекта (структура джоб остаётся).
