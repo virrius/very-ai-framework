@@ -68,9 +68,14 @@ mkdir -p .github/workflows .github/scripts scripts
 cp /tmp/cicd-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
 cp /tmp/cicd-template/.github/scripts/codex_review.py .github/scripts/
 cp /tmp/cicd-template/scripts/{services.sh,deploy.sh} scripts/
-cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml,AGENTS.md} .
+cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
 cp /tmp/cicd-template/docker-compose.yml .   # шаблон — переписать под свои сервисы
 ```
+
+**`AGENTS.md`** (правила разработки — агенты читают его автоматически в целевом репо):
+- если его в целевом репо **нет** — скопируй: `cp /tmp/cicd-template/AGENTS.md .`;
+- если **есть** — НЕ затирай, **допиши** в него раздел правил этого CICD (ветки
+  `feature/*`, pre-commit, маркер `@pytest.mark.heavy`, секреты в Environments).
 
 `services/*`, `README.md`, `docs/` шаблона **не** копируй вслепую — это пример и
 документация шаблона; у целевого проекта свои сервисы и README.
