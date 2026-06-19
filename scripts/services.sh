@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Обнаружение сервисов проекта — без хардкода имён. Сервис = каталог под services/.
+#
+#   services.sh list                   -> JSON-массив всех сервисов
+#   services.sh changed <base> <head>  -> JSON-массив сервисов, изменённых между refs
+set -euo pipefail
+
+mode="${1:-list}"
+
+all_services() {
+  for d in services/*/; do
+    [ -d "$d" ] && basename "$d"
+  done
+}
+
+case "$mode" in
+  list)
+    all_services | jq -R . | jq -sc .
+    ;;
+  changed)
+    base="$2"; head="$3"
+    # на первом коммите/force-push base может отсутствовать — берём предыдущий коммит
+    if ! git rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1; then
+      base="${head}~1"
+    fi
+    changed=$(git diff --name-only "$base" "$head" -- services/ | awk -F/ 'NF>1 {print $2}' | sort -u)
+    comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | jq -R . | jq -sc .
+    ;;
+  *)
+    echo "usage: services.sh list|changed" >&2
+    exit 1
+    ;;
+esac

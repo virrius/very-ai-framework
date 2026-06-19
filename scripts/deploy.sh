@@ -2,12 +2,12 @@
 # Deploy services to an environment on this host. Invoked over SSH by CI.
 #
 # Usage: deploy.sh <env> <owner/repo> <tag> [services]
-#   env       — dev | prod | ... (каталог /srv/deploy/<env>, свой порт/проект)
+#   env        — имя окружения (каталог /srv/deploy/<env>, изоляция compose-проекта)
 #   owner/repo — префикс образов GHCR (ghcr.io/<owner/repo>/<svc>)
-#   tag       — тег образа
-#   services  — опционально: "api,worker" или "api worker"; пусто/"all" = все
+#   tag        — тег образа
+#   services   — опционально: список через запятую/пробел; пусто/"all" = все
 #
-# GHCR-креды берутся из env: GHCR_USER, GHCR_TOKEN.
+# GHCR-креды из env: GHCR_USER, GHCR_TOKEN. Никаких project-specific значений.
 set -euo pipefail
 
 ENVIRONMENT="$1"
@@ -15,24 +15,19 @@ REPO="$2"
 TAG="$3"
 SERVICES="${4:-}"
 
-# нормализуем список сервисов: "all"->все, запятые->пробелы
 [ "$SERVICES" = "all" ] && SERVICES=""
 SERVICES="${SERVICES//,/ }"
 
 DIR="/srv/deploy/${ENVIRONMENT}"
-case "$ENVIRONMENT" in
-  prod) API_PORT=8090 ;;
-  *) API_PORT=8080 ;;
-esac
 
 echo "${GHCR_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
 mkdir -p "$DIR"
 cd "$DIR"
-export GITHUB_REPOSITORY="$REPO" TAG="$TAG" API_PORT
-export COMPOSE_PROJECT_NAME="afc_${ENVIRONMENT}"
+export GITHUB_REPOSITORY="$REPO" TAG="$TAG"
+export COMPOSE_PROJECT_NAME="$ENVIRONMENT"   # изоляция стендов — имя окружения, без хардкода
 
-echo "deploy [$ENVIRONMENT] tag=$TAG services='${SERVICES:-all}' api_port=$API_PORT"
+echo "deploy [$ENVIRONMENT] tag=$TAG services='${SERVICES:-all}'"
 # shellcheck disable=SC2086
 docker compose pull $SERVICES
 # shellcheck disable=SC2086

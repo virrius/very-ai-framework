@@ -8,31 +8,27 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
-  detect:
+  changed:
     runs-on: ubuntu-latest
     outputs:
-      api: ${{ steps.filter.outputs.api }}
-      worker: ${{ steps.filter.outputs.worker }}
+      services: ${{ steps.c.outputs.services }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
         with:
-          filters: |
-            api:
-              - 'services/api/**'
-            worker:
-              - 'services/worker/**'
+          fetch-depth: 0
+      - id: c
+        run: echo "services=$(bash scripts/services.sh changed ${{ github.event.before }} ${{ github.sha }})" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: detect
-    if: needs.detect.outputs.api == 'true' || needs.detect.outputs.worker == 'true'
+    needs: changed
+    if: ${{ needs.changed.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.changed.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -43,36 +39,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set image tag
-        id: meta
-        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push api
-        if: needs.detect.outputs.api == 'true'
+      - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
-          context: services/api
+          context: services/${{ matrix.service }}
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/api:latest
-
-      - name: Build and push worker
-        if: needs.detect.outputs.worker == 'true'
-        uses: docker/build-push-action@v5
-        with:
-          context: services/worker
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/worker:latest
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:latest
 
   deploy-dev:
-    needs: [detect, build]
+    needs: [changed, build]
+    if: ${{ needs.changed.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     environment: dev
     steps:
       - uses: actions/checkout@v4
+
       - name: Build app.env (dev config)
         env:
           APP_DOTENV: ${{ vars.APP_DOTENV }}
@@ -80,6 +63,7 @@ jobs:
         run: |
           printf '%s\n' "$APP_DOTENV" > app.env
           if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> app.env; fi
+
       - name: Copy compose + deploy script + env
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -88,6 +72,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           source: "docker-compose.yml,scripts/deploy.sh,app.env"
           target: "/srv/deploy/dev"
+
       - name: Deploy changed services to dev
         uses: appleboy/ssh-action@v1
         env:
@@ -99,5 +84,5 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
           script: >
-            bash /srv/deploy/dev/scripts/deploy.sh dev ${{ github.repository }} ${{ needs.build.outputs.tag }}
-            "${{ needs.detect.outputs.api == 'true' && 'api' || '' }} ${{ needs.detect.outputs.worker == 'true' && 'worker' || '' }}"
+            bash /srv/deploy/dev/scripts/deploy.sh dev ${{ github.repository }} ${{ github.sha }}
+            "${{ join(fromJson(needs.changed.outputs.services), ' ') }}"

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: "Services to build (comma-separated, e.g. 'api,worker') or 'all'"
+        description: "Services to build (comma-separated) or 'all'"
         required: true
         type: string
         default: all

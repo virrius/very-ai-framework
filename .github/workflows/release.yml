@@ -9,13 +9,24 @@ env:
   IMAGE_PREFIX: ghcr.io/${{ github.repository }}
 
 jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.s.outputs.services }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: s
+        run: echo "services=$(bash scripts/services.sh list)" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: discover
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.discover.outputs.services) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -26,27 +37,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set image tag from git tag
-        id: meta
-        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push api
+      - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v5
         with:
-          context: services/api
+          context: services/${{ matrix.service }}
           push: true
           tags: |
-            ${{ env.IMAGE_PREFIX }}/api:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/api:stable
-
-      - name: Build and push worker
-        uses: docker/build-push-action@v5
-        with:
-          context: services/worker
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}/worker:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_PREFIX }}/worker:stable
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.ref_name }}
+            ${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:stable
 
   deploy-prod:
     needs: build
@@ -54,6 +52,7 @@ jobs:
     environment: prod
     steps:
       - uses: actions/checkout@v4
+
       - name: Build app.env (prod config)
         env:
           APP_DOTENV: ${{ vars.APP_DOTENV }}
@@ -61,6 +60,7 @@ jobs:
         run: |
           printf '%s\n' "$APP_DOTENV" > app.env
           if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> app.env; fi
+
       - name: Copy compose + deploy script + env
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -69,6 +69,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           source: "docker-compose.yml,scripts/deploy.sh,app.env"
           target: "/srv/deploy/prod"
+
       - name: Deploy all services to prod
         uses: appleboy/ssh-action@v1
         env:
@@ -79,4 +80,4 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           envs: GHCR_USER,GHCR_TOKEN
-          script: bash /srv/deploy/prod/scripts/deploy.sh prod ${{ github.repository }} ${{ needs.build.outputs.tag }}
+          script: bash /srv/deploy/prod/scripts/deploy.sh prod ${{ github.repository }} ${{ github.ref_name }}
