@@ -131,6 +131,10 @@ cp /tmp/cicd-template/{.pre-commit-config.yaml,pyproject.toml} .
    красный CI не дал смёржить. `static`/`security` бегут на push в `feature` (если хочешь
    требовать и их на PR — добавь им триггер `pull_request`). `codex-review` в required
    не ставь — он на self-hosted и только при открытии PR.
+   **Важно:** на **приватном** репозитории branch protection / rulesets требуют плана
+   **GitHub Pro/Team/Enterprise** — на free-плане API вернёт 403 «Upgrade to Pro or make
+   public». Тогда либо апгрейд плана, либо публичный репо, либо живёшь без enforced-гейта
+   (CI всё равно гоняется и виден в PR, просто merge технически не блокируется).
 
 ## Шаг 4. Codex-ревью: подключить к runner'у
 

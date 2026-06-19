@@ -19,9 +19,15 @@ case "$mode" in
     ;;
   changed)
     base="$2"; head="$3"
-    # на первом коммите/force-push base может отсутствовать — берём предыдущий коммит
+    # на первом коммите/force-push base может отсутствовать — берём предыдущий коммит,
+    # а если и его нет (самый первый коммит репо) — diff против пустого дерева git,
+    # тогда все файлы считаются добавленными и собираются все сервисы.
     if ! git rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1; then
-      base="${head}~1"
+      if git rev-parse -q --verify "${head}~1^{commit}" >/dev/null 2>&1; then
+        base="${head}~1"
+      else
+        base=$(git hash-object -t tree /dev/null)   # пустое дерево: 4b825dc6...
+      fi
     fi
     changed=$(git diff --name-only "$base" "$head" -- services/ | awk -F/ 'NF>1 {print $2}' | sort -u)
     comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | jq -R . | jq -sc .
