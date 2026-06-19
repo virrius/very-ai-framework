@@ -20,11 +20,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout PR head
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh pr checkout ${{ github.event.issue.number }}
-
       - name: Review PR with Codex
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

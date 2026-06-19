@@ -137,8 +137,11 @@ def main() -> None:
         base = base or info["base"]["ref"]
         head_sha = head_sha or info["head"]["sha"]
 
+    # Диффим по ref'ам, не по рабочему дереву: скрипт запускается из ветки,
+    # где он лежит (main), а PR-head берём явно через refs/pull/<n>/head.
     subprocess.run(["git", "fetch", "origin", base], check=False)
-    diff = run("git", "diff", f"origin/{base}...HEAD").strip()
+    subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], check=False)
+    diff = run("git", "diff", f"origin/{base}...FETCH_HEAD").strip()
     if not diff:
         gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token,
                {"body": f"🤖 Codex review: изменений относительно `{base}` нет."})
