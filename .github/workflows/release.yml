@@ -53,13 +53,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build app.env (prod config)
+      - name: Build .env (prod config)
         env:
           APP_DOTENV: ${{ vars.APP_DOTENV }}
           APP_SECRET: ${{ secrets.APP_SECRET }}
         run: |
-          printf '%s\n' "$APP_DOTENV" > app.env
-          if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> app.env; fi
+          printf '%s\n' "$APP_DOTENV" > .env
+          if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> .env; fi
 
       - name: Copy compose + deploy script + env
         uses: appleboy/scp-action@v0.1.7
@@ -67,7 +67,7 @@ jobs:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: "docker-compose.yml,.github/scripts/deploy.sh,app.env"
+          source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
           target: "/srv/deploy/prod"
 
       - name: Deploy all services to prod

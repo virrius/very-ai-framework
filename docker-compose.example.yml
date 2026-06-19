@@ -1,0 +1,19 @@
+# ОБРАЗЕЦ. Скопируй в docker-compose.yml и опиши свои сервисы.
+# Контракт, на который завязан деплой:
+#   образ    = ghcr.io/${GITHUB_REPOSITORY}/<сервис>:${TAG}
+#   env_file = .env   (его собирает деплой из конфига окружения)
+# Порты/реплики/прочее — на усмотрение проекта.
+services:
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY}/api:${TAG:-latest}
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  worker:
+    image: ghcr.io/${GITHUB_REPOSITORY}/worker:${TAG:-latest}
+    env_file:
+      - .env
+    restart: unless-stopped
