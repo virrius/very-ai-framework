@@ -114,7 +114,7 @@ file the target uses, **without binding to the name**:
 ```bash
 mkdir -p docs/gitmark
 cp /tmp/aifw-template/docs/gitmark/ontology.md docs/gitmark/   # the ontology spec, reusable as-is
-grep -qxF '.gitmark/' .gitignore 2>/dev/null || echo '.gitmark/' >> .gitignore   # derived index, never committed
+for pat in '.gitmark/' '__pycache__/' '*.pyc'; do grep -qxF "$pat" .gitignore 2>/dev/null || echo "$pat" >> .gitignore; done   # derived index + bytecode — never committed
 python3 .claude/skills/kb-search/gitmark.py index              # build the search index
 ```
 
