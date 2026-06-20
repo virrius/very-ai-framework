@@ -13,7 +13,7 @@ You're rolling out the **whole framework** from a **template repository** into a
 repository**. The framework is three nested parts, and this skill installs all of them:
 
 - **dev-flow** (process) — the `dev-flow` + `task-breakdown` skills and the development rules in `CLAUDE.md`.
-- **Knowledge Base** (GitMark) — the `kb-search` + `kb-maintain` skills, the `/doc` `/kb-build` `/kb-graph`
+- **Knowledge Base** (GitMark) — the `kb-search` + `kb-maintain` skills, the `/kb-doc` `/kb-build` `/kb-graph`
   commands, the `gitmark` CLI, and a `docs/gitmark/` KB scaffold.
 - **CI/CD** — GitHub Actions workflows + scripts, pre-commit, and the environments / secrets / deploy setup.
 
@@ -95,7 +95,7 @@ path patching is needed — it works because the whole `.claude/` tree is copied
 `claude plugin install`. For a **private** template repo this is currently unreliable (SSH-only,
 Windows bugs) — prefer the copy above.
 
-After this the agent should pick up `/doc`, `/kb-build`, `/kb-graph` and the skills (reload the
+After this the agent should pick up `/kb-doc`, `/kb-build`, `/kb-graph` and the skills (reload the
 session if needed).
 
 ## Step 3. Install the development rules (dev-flow)
@@ -119,8 +119,19 @@ python3 .claude/skills/kb-search/gitmark.py index              # build the searc
 ```
 
 `docs/gitmark/` is the KB **source of truth** (the rest of `docs/` is free for non-KB material).
-The KB starts almost empty — bootstrap it by running **`/kb-build`** (it surveys the codebase and
-generates per-area docs following the ontology), or add docs over time with **`/doc`**.
+The scaffold starts almost empty (just `ontology.md`).
+
+**Build the KB now — run `/kb-build`.** It surveys the codebase and fans out curator agents to
+generate per-area docs into `docs/gitmark/` (per-service READMEs, reference specs, runbooks,
+decisions, entry point) following the ontology. This is the step that actually fills the KB —
+skipping it leaves it empty (only `ontology.md`). When it finishes, re-index and lint:
+
+```bash
+python3 .claude/skills/kb-search/gitmark.py index   # re-index after /kb-build filled docs/gitmark/
+python3 .claude/skills/kb-search/gitmark.py lint
+```
+
+Add or update a single doc later with **`/kb-doc <topic>`**.
 
 ## Step 5. Port the CI/CD pipeline files + meet the contract
 
@@ -214,7 +225,7 @@ self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT sub
 
 ## Step 9. Verify the install
 
-- **dev-flow / KB skills** — the agent sees `/doc`, `/kb-build`, `/kb-graph` and the skills
+- **dev-flow / KB skills** — the agent sees `/kb-doc`, `/kb-build`, `/kb-graph` and the skills
   (reload the session if they don't appear yet).
 - **KB** — `python3 .claude/skills/kb-search/gitmark.py lint` is clean and `... gitmark.py stat`
   reports the index.

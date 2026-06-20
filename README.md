@@ -39,7 +39,7 @@
 | `skills/setup-framework/` | Setup | инсталлер: разворачивает **весь** фреймворк в другом репо. В корне (**не** в `.claude/`) — не догфуд, в проект не копируется |
 | `.claude/skills/dev-flow/`, `.claude/skills/task-breakdown/` | Dev-flow | скиллы процесса разработки |
 | `.claude/skills/kb-search/`, `.claude/skills/kb-maintain/` | KB | поиск и ведение базы знаний (GitMark) |
-| `.claude/commands/` | KB | команды `/doc`, `/kb-build`, `/kb-graph` |
+| `.claude/commands/` | KB | команды `/kb-doc`, `/kb-build`, `/kb-graph` |
 | `docs/gitmark/` | KB | база знаний прикладного проекта (`ontology.md` — спека модели) |
 | `CLAUDE.md` | Dev-flow | правила разработки для кодового агента |
 | `pyproject.toml` | CI/CD | конфиг ruff + pytest |

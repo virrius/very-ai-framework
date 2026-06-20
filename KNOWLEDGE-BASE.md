@@ -18,7 +18,7 @@
 | [`docs/gitmark/ontology.md`](docs/gitmark/ontology.md) | Спека модели: словари `node_type`/`status`, таблица типов связей, инварианты |
 | [`.claude/skills/kb-search`](.claude/skills/kb-search/SKILL.md) | Поиск по KB через GitMark CLI (`bm25`/`trigram`/`fuzzy`) |
 | [`.claude/skills/kb-maintain`](.claude/skills/kb-maintain/SKILL.md) | Правила ведения KB: добавление/правка/перенос доков, frontmatter, связи |
-| `.claude/commands/doc.md` (`/doc`) | Создать/обновить один документ по теме (обёртка над `kb-maintain`) |
+| `.claude/commands/kb-doc.md` (`/kb-doc`) | Создать/обновить один документ по теме (обёртка над `kb-maintain`) |
 | `.claude/commands/kb-build.md` (`/kb-build`) | Построить всю KB репозитория фан-аутом агентов-кураторов |
 
 ## CLI (GitMark)
