@@ -164,8 +164,8 @@ Bring the project to the contract:
   ```bash
   pip install pre-commit && pre-commit install
   ```
-  For the local `secret-scan` hook install `trufflehog`. Or without the hook — run
-  `pre-commit run` by hand before a commit (the agent variant).
+  Local secret gate is `detect-secrets` (pre-commit installs it; false positives → `.secrets.baseline`);
+  verified scan (`trufflehog`) runs in CI. No hook — run `pre-commit run` by hand (the agent variant).
 
 ## Step 6. Configure GitHub
 

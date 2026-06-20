@@ -139,8 +139,18 @@ def main() -> None:
 
     # Диффим по ref'ам, не по рабочему дереву: скрипт запускается из ветки,
     # где он лежит (main), а PR-head берём явно через refs/pull/<n>/head.
-    subprocess.run(["git", "fetch", "origin", base], check=False)
-    subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], check=False)
+    fetch_base = subprocess.run(["git", "fetch", "origin", base], capture_output=True, text=True)
+    fetch_head = subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], capture_output=True, text=True)
+    if fetch_base.returncode or fetch_head.returncode:
+        # fetch упал — НЕ выдаём ложное «изменений нет»: сообщаем и падаем, чтобы дефект был виден.
+        err = (fetch_base.stderr + fetch_head.stderr).strip()[:1000]
+        gh_api(
+            "POST",
+            f"/repos/{repo}/issues/{pr}/comments",
+            token,
+            {"body": f"🤖 Codex review: не смог получить изменения (git fetch упал).\n\n```\n{err}\n```"},
+        )
+        sys.exit("git fetch failed")
     diff = run("git", "diff", f"origin/{base}...FETCH_HEAD").strip()
     if not diff:
         gh_api(
@@ -151,7 +161,10 @@ def main() -> None:
         )
         return
 
-    raw = run("codex", "exec", PROMPT + diff, timeout=600)
+    # codex обрабатывает недоверенный текст диффа (его пишет автор PR). Токен ему не нужен —
+    # убираем GH_TOKEN из окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
+    codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
+    raw = run("codex", "exec", PROMPT + diff, timeout=600, env=codex_env)
     parsed = parse_codex_json(raw)
     if parsed is None:
         gh_api(

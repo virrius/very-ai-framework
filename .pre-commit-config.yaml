@@ -6,17 +6,19 @@ repos:
         args: [--fix]
       - id: ruff-format
 
+  # Локальный гейт секретов — pre-commit сам ставит detect-secrets (Python), без ручной
+  # установки бинаря/Docker. Авторитетный скан (trufflehog --only-verified) — в CI (feature.yml).
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+
   - repo: local
     hooks:
-      - id: secret-scan
-        name: Secret scan
-        entry: trufflehog filesystem --no-update .
+      - id: gitmark-lint
+        name: KB lint
+        entry: python .claude/skills/kb-search/gitmark.py lint
         language: system
         pass_filenames: false
-
-      # - id: gitmark-lint
-      #   name: KB lint
-      #   entry: python3 .claude/skills/kb-search/gitmark.py lint
-      #   language: system
-      #   pass_filenames: false
-      #   files: \.md$
+        files: \.md$
