@@ -28,10 +28,10 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install deps (+ project if packaged)
+      - name: Install project + test deps (editable; pytest good practices)
         run: |
           pip install pytest
-          if grep -q '^\[project\]' pyproject.toml; then pip install .; fi
+          if grep -q '^\[project\]' pyproject.toml; then pip install -e ".[test]" || pip install -e .; fi
       - name: Light tests (heavy excluded)
         run: |
           [ -d tests ] || { echo "::notice::нет каталога tests — пропуск"; exit 0; }

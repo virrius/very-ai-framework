@@ -140,7 +140,10 @@ Bring the project to the contract:
   and `env_file: .env` (this `.env` is assembled by deploy from Environments — don't commit it by hand).
   A reference example — `docker-compose.example.yml` in the template repo.
 - **Dependencies** — declare them in `pyproject.toml` → `[project].dependencies` (PEP 621);
-  `pip-audit .` reads them from there, a separate `requirements.txt` isn't needed.
+  `pip-audit .` reads them from there, a separate `requirements.txt` isn't needed. The CI test jobs
+  install the project editable (`pip install -e .`) so tests import the real package, not a sys.path hack.
+- **Test-only deps** (e.g. `httpx` for `fastapi.TestClient`, pytest plugins) → declare a
+  `[project.optional-dependencies]` `test = [...]` extra; CI installs it via `pip install -e ".[test]"`.
 - Tests: `tests/unit`, `tests/integration`; heavy/slow ones — `@pytest.mark.heavy`.
   No tests yet — that's fine: the test jobs tolerate it (they don't fail on "no tests"),
   but without them the quality gate is weaker — add at least a couple.
