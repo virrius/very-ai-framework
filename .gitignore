@@ -5,3 +5,4 @@ __pycache__/
 *.pyc
 .gitmark/
 kb-graph.html
+gitmark-bench-report.html
