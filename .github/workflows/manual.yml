@@ -14,10 +14,9 @@ on:
         type: boolean
         default: false
       environment:
-        description: "Target environment"
-        required: true
-        type: choice
-        options: [dev, prod]
+        description: "Target environment (must exist in repo Settings → Environments)"
+        required: false
+        type: string
         default: dev
 
 jobs:
