@@ -84,7 +84,10 @@
   <footer>
     <div class="wrap">Сгенерировано агентом на релизе <code>v1.0.0</code> · 01.01.26</div>
   </footer>
-  <script src="svg-pan-zoom.min.js"></script>   <!-- вендоренная либа pan/zoom (self-contained, без CDN) -->
-  <script src="overview.js"></script>            <!-- включает pan/zoom на inline-SVG диаграммах; безвреден без них -->
+  <!-- pan/zoom либа с CDN, SRI-pinned (integrity). Недоступна → overview.js оставит статический SVG. -->
+  <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.2/dist/svg-pan-zoom.min.js"
+          integrity="sha384-GGX4llYprEPGp9w5caepn95YWAEflHnsA5ewt+Y+cBEb95og5cXKllnWKSELlzbx"
+          crossorigin="anonymous"></script>
+  <script src="overview.js"></script>            <!-- нормализует inline-SVG + включает pan/zoom, если либа загрузилась -->
 </body>
 </html>

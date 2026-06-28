@@ -1,13 +1,11 @@
-// overview.js — включает pan/zoom на inline-SVG диаграммах через вендоренный svg-pan-zoom.
-// Кнопки +/−/reset, колесо — зум, тащить — двигать, тач/пинч. Клики по узлам ($link) сохраняются.
-// Если svg-pan-zoom не загрузился — тихо оставляем статичный SVG.
+// overview.js — нормализует inline-SVG диаграммы и, если с CDN загрузился svg-pan-zoom,
+// включает pan/zoom: кнопки +/−/reset, колесо — зум, тащить — двигать, тач/пинч; клики
+// по узлам ($link) сохраняются. Либа не загрузилась — остаётся чистый статический SVG.
 (function () {
-  if (typeof window.svgPanZoom !== "function") return;
   document.querySelectorAll(".diagram svg").forEach(function (svg) {
-    // PlantUML пишет в SVG жёсткие пиксельные размеры (style="width:NNNpx" + width/height)
-    // и preserveAspectRatio="none". Инлайн-style перебивает CSS, и svg-pan-zoom считает
-    // канвас равным натуральной ширине диаграммы — fit вырождается. Снимаем пиксельную
-    // фиксацию и чиним соотношение сторон; viewBox у PlantUML уже есть (если нет — строим).
+    // PlantUML пишет жёсткие пиксели (style="width:NNNpx" + width/height) и
+    // preserveAspectRatio="none". Снимаем фиксацию и чиним соотношение сторон, чтобы SVG
+    // корректно масштабировался И статически, И под pan/zoom. viewBox у PlantUML уже есть.
     svg.style.removeProperty("width");
     svg.style.removeProperty("height");
     if (!svg.getAttribute("viewBox")) {
@@ -19,8 +17,11 @@
       } catch (e) { /* SVG ещё не отрисован — оставляем как есть */ }
     }
     svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-    svg.parentElement.classList.add("pannable");
     svg.setAttribute("width", "100%");
+    svg.removeAttribute("height"); // статически высота — из соотношения сторон (CSS height:auto)
+
+    if (typeof window.svgPanZoom !== "function") return; // CDN недоступен → статический SVG
+    svg.parentElement.classList.add("pannable");
     svg.setAttribute("height", "100%");
     window.svgPanZoom(svg, {
       zoomEnabled: true,
