@@ -28,7 +28,9 @@ API = "https://api.github.com"
 SEV_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
 
 PROMPT = """\
-You are a senior code reviewer. Review the git diff below and reply with ONLY a JSON
+You are a senior code reviewer. The full PR branch is checked out in your working
+directory — read any files you need for context (imports, callers, type definitions,
+neighbouring code). Review the changes in the git diff below and reply with ONLY a JSON
 object (no markdown, no prose, no code fences). Schema:
 
 {
@@ -45,8 +47,10 @@ object (no markdown, no prose, no code fences). Schema:
   ]
 }
 
-Focus on bugs, security and performance. Skip trivial style nits. Do NOT modify
-any files. If nothing is notable, return an empty "findings" array and verdict "lgtm".
+Focus on bugs, security and performance. Skip trivial style nits. Only report findings
+on lines that appear in the diff (changed lines); use the surrounding code only as
+context. Do NOT modify any files. If nothing is notable, return an empty "findings"
+array and verdict "lgtm".
 
 Diff:
 """
@@ -176,14 +180,36 @@ def main() -> None:
         finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
         return
 
-    # codex обрабатывает недоверенный текст диффа (его пишет автор PR). Токен ему не нужен —
-    # убираем GH_TOKEN из окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
+    # codex обрабатывает недоверенный код PR. Токен ему не нужен — убираем GH_TOKEN из
+    # окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
     codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
+
+    # Полный код ветки PR — в отдельный detached worktree, для codex ТОЛЬКО на чтение.
+    # Главный чекаут (= default branch, откуда исполняется ЭТОТ скрипт) не трогаем: на
+    # self-hosted раннере недопустимо выполнять CI-логику из присланного контрибьютором
+    # кода. Раннер персистентный — сначала чистим остаток от возможного упавшего прогона.
+    wt = "_pr_src"
+    subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True, text=True)
+    subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
+    add = subprocess.run(["git", "worktree", "add", "--detach", wt, "FETCH_HEAD"], capture_output=True, text=True)
+    pr_cwd = wt if add.returncode == 0 else None
+    if pr_cwd is None:
+        # worktree не встал — деградируем к старому поведению (контекст = только дифф).
+        print(f"worktree add failed, fallback diff-only: {add.stderr.strip()[:300]}")
+
+    # --sandbox read-only: даже успешная prompt-injection из кода PR не запишет файлы и не
+    # уйдёт в сеть. --cd: рабочая папка codex = код ветки PR (или main, если worktree не встал).
+    codex_argv = ["codex", "exec", "--sandbox", "read-only"]
+    if pr_cwd:
+        codex_argv += ["--cd", pr_cwd]
     try:
-        raw = run("codex", "exec", PROMPT + diff, timeout=600, env=codex_env)
+        raw = run(*codex_argv, PROMPT + diff, timeout=600, env=codex_env)
     except Exception as exc:  # noqa: BLE001 — любой сбой codex не должен оставить заглушку висеть
         finalize(f"🤖 Codex review: не удалось выполнить codex.\n\n```\n{str(exc)[:1000]}\n```")
         sys.exit(f"codex exec failed: {exc}")
+    finally:
+        if pr_cwd:
+            subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True, text=True)
 
     parsed = parse_codex_json(raw)
     if parsed is None:
