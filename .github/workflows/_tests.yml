@@ -20,10 +20,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      envs: ${{ steps.find.outputs.envs }}
+      envs: ${{ steps.find.outputs.envs }}   # окружения для матрицы (на feature — affected)
+      all: ${{ steps.find.outputs.all }}      # все обнаруженные (для корректного --ignore)
     steps:
       - uses: actions/checkout@v4
         with:
+          # affected требует полную историю для merge-base; иначе хватает HEAD
           fetch-depth: ${{ inputs.affected && '0' || '1' }}
       - id: find
         shell: bash
@@ -32,15 +34,14 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           all=$(bash .github/scripts/discover-envs.sh)
+          envs="$all"
           if [ "$AFFECTED" = "true" ] && [ "$all" != "[]" ]; then
-            git fetch --no-tags --depth=100 origin "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
-            base=$(git merge-base "origin/$DEFAULT_BRANCH" HEAD 2>/dev/null || echo "")
+            base=$(bash .github/scripts/affected-base.sh "$DEFAULT_BRANCH")
             envs=$(bash .github/scripts/affected-envs.sh "$all" "$base")
-          else
-            envs="$all"
           fi
+          echo "all=$all"   >> "$GITHUB_OUTPUT"
           echo "envs=$envs" >> "$GITHUB_OUTPUT"
-          echo "::notice::test envs: $envs"
+          echo "::notice::test envs: $envs (discovered: $all)"
 
   test:
     needs: discover
@@ -62,10 +63,12 @@ jobs:
         shell: bash
         run: |
           # корневое окружение не должно повторно собирать тесты сервисов,
-          # у которых есть собственное окружение (свой job)
+          # у которых есть собственное окружение. Берём ПОЛНЫЙ список обнаруженных
+          # (outputs.all), а не affected-подмножество — иначе при affected-прогоне
+          # корень мог бы случайно собрать тесты незатронутого сервиса.
           ignores=""
           if [ "${{ matrix.env }}" = "." ]; then
-            for e in $(printf '%s' '${{ needs.discover.outputs.envs }}' | grep -o '"[^"]*"' | tr -d '"'); do
+            for e in $(printf '%s' '${{ needs.discover.outputs.all }}' | grep -o '"[^"]*"' | tr -d '"'); do
               [ "$e" = "." ] && continue
               ignores="$ignores --ignore=$e"
             done

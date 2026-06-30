@@ -41,7 +41,7 @@ if [ -d services ]; then
     done < <(
       find "$svc" -path '*/.venv' -prune -o -path '*/node_modules' -prune -o \
         -name pyproject.toml -print 2>/dev/null \
-      | awk -F/ '{print NF, $0}' | sort -n | cut -d' ' -f2-
+      | awk -F/ '{print NF, $0}' | sort -k1,1n -k2 | cut -d' ' -f2-
     )
   done
 fi
