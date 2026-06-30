@@ -3,6 +3,7 @@
 #
 #   services.sh list                   -> JSON-массив всех сервисов
 #   services.sh changed <base> <head>  -> JSON-массив сервисов, изменённых между refs
+#   services.sh select <input>         -> JSON-массив: 'all' либо список через запятую
 set -euo pipefail
 
 mode="${1:-list}"
@@ -37,8 +38,20 @@ case "$mode" in
     changed=$(printf '%s\n' "$files" | awk -F/ '$1=="services" && NF>1 {print $2}' | sort -u)
     comm -12 <(all_services | sort -u) <(printf '%s\n' "$changed" | sed '/^$/d') | jq -R . | jq -sc .
     ;;
+  select)
+    # ручной выбор: 'all' -> все; иначе список через запятую. Несуществующие имена
+    # отсекаются пересечением с реальными каталогами (как в changed) — заодно защита
+    # от мусора/инъекции во входе workflow_dispatch.
+    input="${2:-all}"
+    if [ "$input" = "all" ]; then
+      all_services | jq -R . | jq -sc .
+    else
+      requested=$(printf '%s\n' "$input" | tr ',' '\n' | sed 's/[[:space:]]//g; /^$/d' | sort -u)
+      comm -12 <(all_services | sort -u) <(printf '%s\n' "$requested") | jq -R . | jq -sc .
+    fi
+    ;;
   *)
-    echo "usage: services.sh list|changed" >&2
+    echo "usage: services.sh list|changed|select" >&2
     exit 1
     ;;
 esac

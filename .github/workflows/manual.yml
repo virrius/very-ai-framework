@@ -4,15 +4,25 @@ on:
   workflow_dispatch:
     inputs:
       service:
-        description: "Services to build (comma-separated) or 'all'"
+        description: "Services (comma-separated) or 'all'"
         required: true
         type: string
         default: all
+      build:
+        description: "Build & push images? (off = deploy an existing tag)"
+        required: true
+        type: boolean
+        default: true
       deploy:
-        description: "Deploy after build?"
+        description: "Deploy after build (or deploy-only if build=off)?"
         required: true
         type: boolean
         default: false
+      tag:
+        description: "Tag to deploy when build=off (e.g. latest, manual-abc123)"
+        required: false
+        type: string
+        default: ""
       environment:
         description: "Target environment (must exist in repo Settings → Environments)"
         required: false
@@ -20,18 +30,71 @@ on:
         default: dev
 
 jobs:
-  build:
+  discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      packages: write
+    timeout-minutes: 10
     outputs:
+      services: ${{ steps.s.outputs.services }}
       tag: ${{ steps.meta.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref }}
+
+      - name: Resolve image tag
+        id: meta
+        # build=on  -> новый тег manual-<sha> из текущего ref;
+        # build=off -> деплоим существующий тег из inputs.tag (обязателен, если будет deploy).
+        env:
+          DO_BUILD: ${{ inputs.build }}
+          DO_DEPLOY: ${{ inputs.deploy }}
+          IN_TAG: ${{ inputs.tag }}
+        run: |
+          if [ "$DO_BUILD" = "true" ]; then
+            echo "tag=manual-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            if [ "$DO_DEPLOY" = "true" ] && [ -z "$IN_TAG" ]; then
+              echo "::error::build=off требует указать tag для деплоя"; exit 1
+            fi
+            # tag — пользовательский ввод: валидируем как docker-тег (bash =~ матчит всю
+            # строку, char-class не включает \n → инъекция перевода строки в GITHUB_OUTPUT
+            # отсекается). grep тут небезопасен: матчит построчно.
+            if [ -n "$IN_TAG" ] && ! [[ "$IN_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::некорректный docker-тег: '$IN_TAG'"; exit 1
+            fi
+            echo "tag=$IN_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve services to build
+        id: s
+        # inputs.service приходит через env (данные), а не вклеивается в текст скрипта —
+        # иначе значение со shell-синтаксисом исполнилось бы (script injection).
+        env:
+          INPUT: ${{ inputs.service }}
+        run: echo "services=$(bash .github/scripts/services.sh select "$INPUT")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: discover
+    if: ${{ inputs.build == true && needs.discover.outputs.services != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.discover.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - id: img
+        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -40,28 +103,24 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set image tag
-        id: meta
-        run: echo "tag=manual-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push services
-        # inputs.service приходит через env (данные), а не вклеивается в текст скрипта —
-        # иначе значение со shell-синтаксисом исполнилось бы (script injection).
-        env:
-          INPUT: ${{ inputs.service }}
-        run: |
-          IMAGE_PREFIX="ghcr.io/${GITHUB_REPOSITORY,,}"
-          for dir in services/*/; do
-            svc=$(basename "$dir")
-            if [ "$INPUT" = "all" ] || echo "$INPUT" | tr ',' '\n' | grep -qx "$svc"; then
-              docker build -t "${IMAGE_PREFIX}/${svc}:${{ steps.meta.outputs.tag }}" "$dir"
-              docker push "${IMAGE_PREFIX}/${svc}:${{ steps.meta.outputs.tag }}"
-            fi
-          done
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          tags: ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ needs.discover.outputs.tag }}
 
   deploy:
-    needs: build
-    if: inputs.deploy == true
+    needs: [discover, build]
+    # always() — чтобы deploy-only (build=off, джоб build скипнут) не утянулся в skip
+    # вслед за build; при этом не деплоим, если build реально упал.
+    if: >-
+      ${{ always() && inputs.deploy == true
+          && needs.discover.result == 'success'
+          && needs.discover.outputs.services != '[]'
+          && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: ${{ inputs.environment }}
@@ -98,8 +157,10 @@ jobs:
           DEPLOY_ENV: ${{ inputs.environment }}
           DEPLOY_REPO: ${{ github.repository }}
           DEPLOY_PROJECT: ${{ github.event.repository.name }}
-          DEPLOY_TAG: ${{ needs.build.outputs.tag }}
-          DEPLOY_SERVICE: ${{ inputs.service }}
+          DEPLOY_TAG: ${{ needs.discover.outputs.tag }}
+          # санитизированный список из discover (через пробел — формат deploy.sh),
+          # а не сырой inputs.service: иначе опечатка в списке прошла бы в деплой.
+          DEPLOY_SERVICE: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
