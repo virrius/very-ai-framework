@@ -73,12 +73,16 @@ jobs:
               ignores="$ignores --ignore=$e"
             done
           fi
-          # tooling-only окружение (pytest-конфиг без [project]) нельзя установить
-          # как пакет — запускаем pytest в эфемерном venv без проекта
-          projflag=""
-          grep -q '^\[project\]' pyproject.toml 2>/dev/null || projflag="--no-project"
+          # [project] → ставим проект + dev-группу + все extras (тест-зависимости:
+          # pytest-asyncio, httpx и т.п., в т.ч. старый extra [test]).
+          # tooling-only (pytest-конфиг без [project]) → эфемерный venv, только pytest.
+          if grep -q '^\[project\]' pyproject.toml 2>/dev/null; then
+            envflag="--all-extras"
+          else
+            envflag="--no-project"
+          fi
           set +e
-          uv run $projflag --with pytest pytest $ignores ${{ inputs.markers }} -q
+          uv run $envflag --with pytest pytest $ignores ${{ inputs.markers }} -q
           rc=$?
           [ $rc -eq 5 ] && rc=0   # ничего не собрано → не падаем (тестов ещё нет)
           exit $rc
