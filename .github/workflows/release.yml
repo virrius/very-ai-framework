@@ -4,7 +4,7 @@ name: Release — stamp version & deploy prod
 # для каждого сервиса берётся готовый образ по sha его последнего изменения
 # (≤ тег) и ретегается на :<vX>+:stable (manifest-copy в реестре, без сборки).
 # Сборка — только fallback: образ не найден (multi-commit push / прочищен реестр).
-# Корректно и для тега на HEAD, и на старый коммit main (адресация по sha, не :latest).
+# Корректно и для тега на HEAD, и на старый коммит main (адресация по sha, не :latest).
 
 on:
   push:
@@ -138,10 +138,12 @@ jobs:
 
   deploy-prod:
     needs: [discover, retag, build]
-    # Запускаемся, если discover ок и ни retag, ни build не упали (skipped — допустимо).
+    # Запускаемся, если discover ок, найден хотя бы один сервис, и ни retag, ни
+    # build не упали (skipped — допустимо: один из списков может быть пуст).
     if: >-
       ${{ always()
           && needs.discover.result == 'success'
+          && !(needs.discover.outputs.build_list == '[]' && needs.discover.outputs.retag_map == '[]')
           && needs.retag.result != 'failure' && needs.retag.result != 'cancelled'
           && needs.build.result  != 'failure' && needs.build.result  != 'cancelled' }}
     runs-on: ubuntu-latest
