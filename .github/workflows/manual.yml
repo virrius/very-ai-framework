@@ -56,6 +56,12 @@ jobs:
             if [ "$DO_DEPLOY" = "true" ] && [ -z "$IN_TAG" ]; then
               echo "::error::build=off требует указать tag для деплоя"; exit 1
             fi
+            # tag — пользовательский ввод: валидируем как docker-тег (bash =~ матчит всю
+            # строку, char-class не включает \n → инъекция перевода строки в GITHUB_OUTPUT
+            # отсекается). grep тут небезопасен: матчит построчно.
+            if [ -n "$IN_TAG" ] && ! [[ "$IN_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              echo "::error::некорректный docker-тег: '$IN_TAG'"; exit 1
+            fi
             echo "tag=$IN_TAG" >> "$GITHUB_OUTPUT"
           fi
 
@@ -152,7 +158,9 @@ jobs:
           DEPLOY_REPO: ${{ github.repository }}
           DEPLOY_PROJECT: ${{ github.event.repository.name }}
           DEPLOY_TAG: ${{ needs.discover.outputs.tag }}
-          DEPLOY_SERVICE: ${{ inputs.service }}
+          # санитизированный список из discover (через пробел — формат deploy.sh),
+          # а не сырой inputs.service: иначе опечатка в списке прошла бы в деплой.
+          DEPLOY_SERVICE: ${{ join(fromJson(needs.discover.outputs.services), ' ') }}
         with:
           host: ${{ vars.SSH_HOST }}
           username: ${{ vars.SSH_USER }}
