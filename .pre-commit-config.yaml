@@ -16,7 +16,7 @@ repos:
     hooks:
       - id: gitmark-lint
         name: KB lint
-        entry: python .claude/skills/kb-search/gitmark.py lint
+        entry: python .claude/skills/kb-search/gitmark.py lint --strict
         language: system
         pass_filenames: false
         files: \.md$
