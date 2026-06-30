@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: ${{ inputs.affected && 0 || 1 }}
+          fetch-depth: ${{ inputs.affected && '0' || '1' }}
       - id: find
         shell: bash
         env:
