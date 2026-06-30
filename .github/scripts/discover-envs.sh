@@ -1,20 +1,10 @@
 #!/usr/bin/env bash
 #
-# Находит тестовые окружения и печатает их компактным JSON-массивом в stdout.
-#
-# Окружение = каталог с pyproject.toml, содержащим секцию [project] (uv-проект).
-# Правило обнаружения:
-#   - корневой pyproject.toml (плоский репозиторий / общие и e2e-тесты в корне);
-#   - по каждому services/<имя>/ — ОДИН верхнеуровневый pyproject.toml
-#     (путь внутри сервиса не важен: workdir/, backend/, корень — любой).
-# Имена сервисов нигде не зашиты; новый сервис подхватывается автоматически.
-#
-# Запуск локально для проверки:  bash .github/scripts/discover-envs.sh
+# Находит тестовые окружения и печатает их JSON-массивом в stdout:
+# корневой pyproject.toml + по одному верхнеуровневому на каждый services/<имя>/.
 set -euo pipefail
 
-# Тестовое окружение: установимый проект ([project]) ЛИБО каталог с pytest-конфигом
-# ([tool.pytest.*]). Второе — чтобы тесты не пропадали молча в tooling-only репозиториях
-# (pyproject только с настройками ruff/pytest, без [project]).
+# Окружение = pyproject с [project] или pytest-конфигом ([tool.pytest.*]).
 is_test_env() { grep -qE '^\[(project|tool\.pytest)' "$1" 2>/dev/null; }
 
 # Печатает аргументы как компактный JSON-массив строк (без зависимости от jq).
@@ -35,7 +25,7 @@ fi
 
 if [ -d services ]; then
   for svc in services/*/; do
-    # манифесты сервиса по возрастанию глубины → берём первый с [project]
+    # манифесты сервиса по возрастанию глубины → берём первый подходящий
     while IFS= read -r manifest; do
       if is_test_env "$manifest"; then
         envs+=("$(dirname "$manifest")")
