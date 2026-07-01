@@ -6,10 +6,6 @@ name: Full tests (manual)
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Ветка/тег/sha для прогона (пусто = ветка из «Use workflow from»)'
-        type: string
-        default: ''
       markers:
         description: 'pytest -m <your input>(пусто = all, heavy; not heavy; smoke or integration …)'
         type: string
@@ -22,8 +18,6 @@ concurrency:
 jobs:
   checks:
     uses: ./.github/workflows/_checks.yml
-    with:
-      ref: ${{ inputs.ref }}
 
   tests:
     uses: ./.github/workflows/_tests.yml
@@ -31,4 +25,3 @@ jobs:
       # ручной прогон → всегда все тест-каталоги (changed_only вне PR смысла не имеет:
       # нет базы для диффа). markers кавычится и подставляется через env → без инъекции.
       markers: ${{ inputs.markers }}
-      ref: ${{ inputs.ref }}

@@ -14,10 +14,6 @@ on:
       python-version:
         type: string
         default: '3.12'
-      ref:
-        description: 'ref для checkout (пусто = ref, вызвавший workflow)'
-        type: string
-        default: ''
 
 jobs:
   discover:
@@ -29,7 +25,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
           # changed_only требует полную историю для merge-base; иначе хватает HEAD
           fetch-depth: ${{ inputs.changed_only && '0' || '1' }}
       - id: find
@@ -58,8 +53,6 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
