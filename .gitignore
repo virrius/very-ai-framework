@@ -5,5 +5,6 @@ __pycache__/
 *.pyc
 .gitmark/
 _pr_src/
+.github/overview/site/
 kb-graph.html
 gitmark-bench-report.html

@@ -137,12 +137,21 @@ Add or update a single doc later with **`/kb-doc <topic>`**.
 
 ```bash
 mkdir -p .github/workflows .github/scripts
-cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
+cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual,overview}.yml .github/workflows/
 cp /tmp/aifw-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
+cp /tmp/aifw-template/.github/scripts/overview_{publish.sh,restore.sh} .github/scripts/
+cp -r /tmp/aifw-template/.github/overview .github/    # overview-сайт: ТЗ + шаблон + рецепт агенту
 cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
+grep -qxF '.github/overview/site/' .gitignore || echo '.github/overview/site/' >> .gitignore
 ```
 
 Don't copy the template's `README.md` / `CICD.md` blindly — the target project has its own.
+
+**Overview-on-release** (`overview.yml`) — just one more workflow: on a `v*` tag a CI agent builds
+the project's overview site (per `.github/overview/overview-build.md`) and publishes it to Pages;
+the `overview` branch is created by CI on first release. Files are copied above — afterwards just
+fill in `.github/overview/overview.rules.md` for the project and enable Pages (Step 6). Needs
+`CLAUDE_CODE_OAUTH_TOKEN` (same as `@claude`); absent → the workflow no-ops with a notice.
 
 Bring the project to the contract:
 - Each service is a `services/<name>/` directory with a `Dockerfile`.
@@ -192,6 +201,8 @@ Bring the project to the contract:
    members (a guard on `author_association` in the workflow). **On PUBLIC repos be careful:**
    `@claude` pushes commits, `@codex` runs on self-hosted — don't expose them to forks/outsiders.
 5. Enable GitHub Actions; make sure `GITHUB_TOKEN` has `packages: write` (for GHCR).
+   For the overview site: **Settings → Pages → Source = GitHub Actions** (the `overview.yml`
+   workflow publishes via `deploy-pages`; no `gh-pages` branch needed).
 6. **Branch protection** (Settings → Branches → rule for `main`): require a PR and
    **required status checks** — `unit-tests`, `integration-tests` (they run on PR), so a red
    CI can't be merged. `static`/`security` run on push to `feature` (if you want to require
