@@ -1,0 +1,150 @@
+name: Build changed & deploy dev
+
+# Автоматика на мерж в main. Собираем образы ТОЛЬКО сервисов с изменённым кодом
+# Деплоим по :latest: изменённые сервисы если yt менялся конфиг стека (compose/deploy.sh)
+on:
+  push:
+    branches: [main]
+
+# Только самый свежий пуш в main доводится до конца: медленный build старого
+# коммита отменяется и не может перезаписать :latest ПОЗЖЕ нового (иначе dev
+# откатился бы на старый образ). Для dev это «последний коммит побеждает».
+concurrency:
+  group: deploy-dev-pipeline
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    # build — что пересобирать; deploy — что выкатывать (может быть шире build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.p.outputs.build }}
+      deploy: ${{ steps.p.outputs.deploy }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: p
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: |
+          # build — сервисы с изменённым кодом (их образы пересобираем)
+          build=$(bash .github/scripts/services.sh changed "$BEFORE" "$SHA")
+          # deploy — по умолчанию те же; но правка конфига стека
+          # (docker-compose.yml / deploy.sh) → редеплой ВСЕХ (без пересборки)
+          deploy="$build"
+          if git rev-parse -q --verify "${BEFORE}^{commit}" >/dev/null 2>&1 \
+             && git diff --name-only "$BEFORE" "$SHA" \
+                | grep -qE '^(docker-compose\.yml|\.github/scripts/deploy\.sh)$'; then
+            deploy=$(bash .github/scripts/services.sh list)
+          fi
+          echo "build=$build"   >> "$GITHUB_OUTPUT"
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
+          echo "::notice::build=$build deploy=$deploy"
+
+  build:
+    needs: plan
+    if: ${{ needs.plan.outputs.build != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.plan.outputs.build) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: img
+        run: echo "prefix=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }}
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          push: true
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          tags: |
+            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ steps.img.outputs.prefix }}/${{ matrix.service }}:latest
+
+  deploy-dev:
+    needs: [plan, build]
+    # always(): при правке только конфига стека build пустой/скипнут, но деплой нужен.
+    # При этом не деплоим, если build реально упал.
+    if: >-
+      ${{ always() && needs.plan.outputs.deploy != '[]'
+          && needs.plan.result == 'success'
+          && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: dev
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    steps:
+      - name: Preflight — dev-конфиг задан
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          [ -z "$miss" ] || { echo "::error::нет dev-конфига:$miss (Environment dev → Variables/Secrets)"; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - name: Build .env (dev config)
+        env:
+          APP_DOTENV: ${{ vars.APP_DOTENV }}
+          APP_SECRET: ${{ secrets.APP_SECRET }}
+        run: |
+          printf '%s\n' "$APP_DOTENV" > .env
+          if [ -n "$APP_SECRET" ]; then printf 'APP_SECRET=%s\n' "$APP_SECRET" >> .env; fi
+
+      - name: Copy compose + deploy script + env
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634  # v0.1.7
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "docker-compose.yml,.github/scripts/deploy.sh,.env"
+          target: "/srv/deploy/${{ github.event.repository.name }}/dev"
+
+      - name: Deploy to dev (:latest)
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2  # v1.2.5
+        # dev деплоим по :latest — единый тег для всего deploy-набора: и только что
+        # пересобранных сервисов, и незатронутых при редеплое конфига стека.
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN
+          script: >
+            bash /srv/deploy/${{ github.event.repository.name }}/dev/.github/scripts/deploy.sh dev ${{ github.repository }} latest
+            "${{ join(fromJson(needs.plan.outputs.deploy), ' ') }}"

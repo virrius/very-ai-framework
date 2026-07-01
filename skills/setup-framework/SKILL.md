@@ -137,9 +137,10 @@ Add or update a single doc later with **`/kb-doc <topic>`**.
 
 ```bash
 mkdir -p .github/workflows .github/scripts
-cp /tmp/aifw-template/.github/workflows/{feature,pr,codex-command,claude,push-main,release,manual}.yml .github/workflows/
-cp /tmp/aifw-template/.github/scripts/{codex_review.py,services.sh,deploy.sh} .github/scripts/
-cp /tmp/aifw-template/{.pre-commit-config.yaml,pyproject.toml} .
+# целиком — в наборе нет ничего лишнего, а перечисление файлов протухает при добавлении новых
+cp -r /tmp/aifw-template/.github/workflows/. .github/workflows/
+cp -r /tmp/aifw-template/.github/scripts/.  .github/scripts/
+cp /tmp/aifw-template/.pre-commit-config.yaml .   # pyproject.toml — у целевого проекта свой, не затираем
 ```
 
 Don't copy the template's `README.md` / `CICD.md` blindly — the target project has its own.
@@ -151,15 +152,15 @@ Bring the project to the contract:
   and `env_file: .env` (this `.env` is assembled by deploy from Environments — don't commit it by hand).
   A reference example — `docker-compose.example.yml` in the template repo.
 - **Dependencies** — declare them in `pyproject.toml` → `[project].dependencies` (PEP 621);
-  `pip-audit .` reads them from there, a separate `requirements.txt` isn't needed. The CI test jobs
-  install the project editable (`pip install -e .`) so tests import the real package, not a sys.path hack.
-- **Test-only deps** (e.g. `httpx` for `fastapi.TestClient`, pytest plugins) → declare a
-  `[project.optional-dependencies]` `test = [...]` extra; CI installs it via `pip install -e ".[test]"`.
+  `pip-audit .` reads them from there, a separate `requirements.txt` isn't needed. CI runs tests
+  via `uv` (`uv run --all-extras` when `[project]` exists, else `--no-project`) — tests import the real package.
+- **Test-only deps** (e.g. `httpx` for `fastapi.TestClient`, pytest plugins) → put them in a
+  `[project.optional-dependencies]` extra or a `[dependency-groups]` `dev` group; `uv run --all-extras` installs both.
 - Tests: `tests/unit`, `tests/integration`; heavy/slow ones — `@pytest.mark.heavy`.
   No tests yet — that's fine: the test jobs tolerate it (they don't fail on "no tests"),
   but without them the quality gate is weaker — add at least a couple.
-- If the project isn't Python — in `feature.yml`/`pr.yml` replace the ruff/pytest/pip-audit steps
-  with the project's tooling (the job structure stays).
+- If the project isn't Python — replace the tooling steps in `_checks.yml` (ruff, pip-audit) and
+  `_tests.yml` (pytest) with the project's own (the job structure stays).
 - Enable pre-commit:
   ```bash
   pip install pre-commit && pre-commit install
@@ -188,15 +189,14 @@ Bring the project to the contract:
 3. **App config:** a `APP_DOTENV` Variable (a multiline `.env`) per environment;
    secret values — as separate Environment Secrets (e.g. `APP_SECRET`).
 4. **(opt.) @claude:** `CLAUDE_CODE_OAUTH_TOKEN` Secret (`claude setup-token`) +
-   install the "Claude" GitHub App. `@claude`/`@codex review`/`@codex answer` are triggered only by repo
+   install the "Claude" GitHub App. `@claude`/`@codex review`/`@codex …` are triggered only by repo
    members (a guard on `author_association` in the workflow). **On PUBLIC repos be careful:**
    `@claude` pushes commits, `@codex` runs on self-hosted — don't expose them to forks/outsiders.
 5. Enable GitHub Actions; make sure `GITHUB_TOKEN` has `packages: write` (for GHCR).
 6. **Branch protection** (Settings → Branches → rule for `main`): require a PR and
-   **required status checks** — `unit-tests`, `integration-tests` (they run on PR), so a red
-   CI can't be merged. `static`/`security` run on push to `feature` (if you want to require
-   them on PR too — add a `pull_request` trigger to them). Don't put `codex-review` in required —
-   it's a disabled action (`if: false` in `pr.yml`) and on self-hosted.
+   **required status checks** — the PR CI jobs `checks` and `tests` (both run on `pull_request`),
+   so a red CI can't be merged. Don't put `codex-review` in required — it's off by default
+   (`vars.CODEX_AUTO_REVIEW`) and runs on self-hosted.
    **Important:** on a **private** repo, branch protection / rulesets require a
    **GitHub Pro/Team/Enterprise** plan — on the free plan the API returns 403 "Upgrade to Pro or make
    public". Then it's either a plan upgrade, a public repo, or living without an enforced gate
@@ -204,8 +204,8 @@ Bring the project to the contract:
 
 ## Step 7. Codex review: connect it to the runner
 
-Codex review (`codex-command.yml` on-demand via `@codex …`; the auto-pass in
-`pr.yml` is a disabled action, `if: false`) runs on a
+Codex review (`codex-command.yml` on-demand via `@codex …`; the auto-review in `pr.yml` is off
+by default, enabled with `vars.CODEX_AUTO_REVIEW=true`) runs on a
 self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT subscription).
 
 - **If such a runner is already deployed** (shared / in another org repository) —
@@ -231,8 +231,8 @@ self-hosted runner with the labels `self-hosted,codex` (auth — via ChatGPT sub
   (reload the session if they don't appear yet).
 - **KB** — `python3 .claude/skills/kb-search/gitmark.py lint` is clean and `... gitmark.py stat`
   reports the index.
-- **CI/CD** — `pre-commit run --all-files` passes; pushing a `feature/*` branch triggers Feature CI,
-  and opening a PR triggers the PR checks.
+- **CI/CD** — `pre-commit run --all-files` passes; pushing a `feature/*` branch runs no CI
+  (pre-commit is the gate), and opening a PR triggers the PR checks (`checks` + `tests`).
 
 Report what was installed per pillar and anything that needs a human decision (plan limits for
 branch protection, missing server access, Codex method, etc.).

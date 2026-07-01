@@ -1,16 +1,9 @@
 name: Release — promote images & deploy prod
 
-# Триггер: тег v*. Релиз НИЧЕГО не пересобирает.
-# push-main на каждый мерж в main уже собрал изменённые сервисы и пометил их
-# двумя тегами :<sha> и :latest. Сервис, который push-main не собирал, не менялся —
-# значит его :latest уже актуален для HEAD main. Поэтому релиз — это чистый promotion:
-# для КАЖДОГО сервиса берём текущий :latest и штампуем на него версию :<vX> + :stable
-# через `docker buildx imagetools create` (manifest-copy в реестре, секунды, без buildx-бутстрапа).
-# Если у сервиса нет :latest (ни разу не собран push-main) — падаем с понятной ошибкой,
-# а не чиним пересборкой на лету: релиз промоутит, а не строит.
-#
-# Тег ОБЯЗАН стоять на текущем HEAD main (см. verify-tag): промоут адресует :latest =
-# состояние HEAD, поэтому релиз со старого коммита промоутил бы не то состояние — запрещаем.
+# Триггер: тег v*.
+# Шаги: prepare (tag == HEAD main + пин образов в digest: изменённое по :<sha>,
+#        остальное по :latest) → tests →
+# promote (digest → :vX + :stable) → deploy-prod.
 
 on:
   push:
@@ -18,39 +11,90 @@ on:
       - "v*"
 
 jobs:
-  verify-tag:
+  prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      services: ${{ steps.s.outputs.services }}
+      digests: ${{ steps.pin.outputs.digests }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Tag must point at current main HEAD
-        # Строгое равенство, а не is-ancestor: промоут берёт :latest = состояние HEAD.
-        # Тег на старом коммите промоутил бы HEAD-образы под «старой» версией — запрещаем.
+        # Строгое равенство, а не is-ancestor: релиз выкатывает состояние HEAD.
+        # Тег на старом коммите промоутил бы не то состояние — запрещаем.
         run: |
           git fetch origin +refs/heads/main:refs/remotes/origin/main --quiet
           HEAD_SHA=$(git rev-parse refs/remotes/origin/main)
           [ "$GITHUB_SHA" = "$HEAD_SHA" ] || {
-            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на текущем HEAD main (${HEAD_SHA}). Релиз промоутит :latest = состояние HEAD — тег должен стоять на HEAD. Перетегни актуальный main."
+            echo "::error::tag ${GITHUB_REF_NAME} (${GITHUB_SHA}) не на текущем HEAD main (${HEAD_SHA}). Тег должен стоять на HEAD. Перетегни актуальный main."
             exit 1
           }
 
-  discover:
-    needs: verify-tag
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    outputs:
-      services: ${{ steps.s.outputs.services }}
-    steps:
-      - uses: actions/checkout@v4
       - id: s
         run: echo "services=$(bash .github/scripts/services.sh list)" >> "$GITHUB_OUTPUT"
 
-  # Промоут: для каждого сервиса :latest -> :<vX> + :stable. Без сборки и без setup-buildx.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: pin
+        # «Фото» образов в неизменяемый digest, встык за проверкой тега; дальше релиз
+        # адресует только digest. Источник digest:
+        #   сервис изменён релизным коммитом → его образ = :<sha> (пушит dev-build того
+        #     же мержа). Берём :<sha>, а НЕ плавающий :latest, который в момент релиза
+        #     мог ещё не обновиться. Нет :<sha> → dev-build не закончился → падаем.
+        #   сервис на HEAD не менялся → :latest авторитетен и сейчас не пересобирается.
+        env:
+          SERVICES: ${{ steps.s.outputs.services }}
+          SHA: ${{ github.sha }}
+        run: |
+          PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          # что пересобрал релизный коммит (его авторитетный образ = :<sha>)
+          if git rev-parse -q --verify "HEAD^" >/dev/null 2>&1; then
+            changed=$(bash .github/scripts/services.sh changed "HEAD^" "HEAD")
+          else
+            changed="$SERVICES"   # нет родителя → считаем изменёнными все (fail closed)
+          fi
+          map='{}'
+          for svc in $(printf '%s' "$SERVICES" | jq -r '.[]'); do
+            if printf '%s' "$changed" | jq -e --arg s "$svc" 'index($s) != null' >/dev/null; then
+              ref="$PREFIX/$svc:$SHA"; src="sha"
+            else
+              ref="$PREFIX/$svc:latest"; src="latest"
+            fi
+            if ! digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+              if [ "$src" = "sha" ]; then
+                echo "::error::образ $ref не найден: dev-build релизного коммита ещё не закончился. Дождись сборки и перезапусти release (Actions → Re-run jobs)."
+              else
+                echo "::error::образ $ref недоступен: нет в реестре или нет прав. Релиз промоутит готовое, а не пересобирает."
+              fi
+              exit 1
+            fi
+            echo "pin $svc ($src) -> $digest"
+            map=$(jq -c --arg s "$svc" --arg d "$digest" '. + {($s): $d}' <<<"$map")
+          done
+          echo "digests=$map" >> "$GITHUB_OUTPUT"
+
+  # Полный прогон тестов на релизном коммите. Упали → promote/deploy-prod не запустятся.
+  tests:
+    needs: prepare
+    uses: ./.github/workflows/_tests.yml
+    with:
+      markers: ''
+
+  # Промоут: для каждого сервиса зафиксированный digest -> :<vX> + :stable. Без сборки.
   promote:
-    needs: [verify-tag, discover]
-    if: ${{ needs.discover.outputs.services != '[]' }}
+    needs: [prepare, tests]
+    if: ${{ needs.prepare.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -59,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: ${{ fromJson(needs.discover.outputs.services) }}
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
     steps:
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -67,24 +111,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Stamp version onto current image
+      - name: Stamp version onto pinned digest
         env:
           SVC: ${{ matrix.service }}
           REF: ${{ github.ref_name }}
+          DIGEST: ${{ fromJson(needs.prepare.outputs.digests)[matrix.service] }}
         run: |
+          [ -n "$DIGEST" ] || { echo "::error::нет зафиксированного digest для $SVC"; exit 1; }
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
-          SRC="$PREFIX/$SVC:latest"
-          if ! docker buildx imagetools inspect "$SRC" >/dev/null 2>&1; then
-            echo "::error::образ $SRC недоступен: нет в реестре или нет прав на чтение пакета. Релиз промоутит готовое, а не пересобирает."
-            exit 1
-          fi
-          echo "promote $SVC: :latest -> :$REF, :stable"
+          echo "promote $SVC: $DIGEST -> :$REF, :stable"
           docker buildx imagetools create \
-            -t "$PREFIX/$SVC:$REF" -t "$PREFIX/$SVC:stable" "$SRC"
+            -t "$PREFIX/$SVC:$REF" -t "$PREFIX/$SVC:stable" "$PREFIX/$SVC@$DIGEST"
 
   deploy-prod:
-    needs: [discover, promote]
-    if: ${{ needs.discover.outputs.services != '[]' }}
+    needs: [prepare, promote]
+    if: ${{ needs.prepare.outputs.services != '[]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: prod
@@ -95,6 +136,18 @@ jobs:
       group: deploy-prod
       cancel-in-progress: false
     steps:
+      - name: Preflight — prod-конфиг задан
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_USER: ${{ vars.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_KEY }}
+        run: |
+          miss=""
+          [ -n "$SSH_HOST" ] || miss="$miss SSH_HOST"
+          [ -n "$SSH_USER" ] || miss="$miss SSH_USER"
+          [ -n "$SSH_KEY" ]  || miss="$miss SSH_KEY"
+          [ -z "$miss" ] || { echo "::error::нет prod-конфига:$miss (Environment prod → Variables/Secrets)"; exit 1; }
+
       - uses: actions/checkout@v4
 
       - name: Build .env (prod config)

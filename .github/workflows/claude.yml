@@ -35,10 +35,8 @@ jobs:
         with:
           # OAuth-токен подписки Claude Pro/Max вместо API-ключа.
           # Сгенерировать: `claude setup-token` (формат sk-ant-oat01-...).
-          # Внимание: расходует квоту твоей подписки — ок для нечастого @claude,
-          # для тяжёлого CI Anthropic рекомендует обычный API-ключ.
+          # Внимание: расходует квоту твоей подписки
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # @claude в комментарии распознаётся автоматически
       - name: Skip notice
         if: env.CLAUDE_CODE_OAUTH_TOKEN == ''
         run: echo "CLAUDE_CODE_OAUTH_TOKEN не задан — @claude не сконфигурирован, пропуск (job зелёный)."

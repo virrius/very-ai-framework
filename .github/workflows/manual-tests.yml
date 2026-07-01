@@ -1,0 +1,26 @@
+name: Full tests (manual)
+
+# Ручной полный прогон CI на любой ветке (workflow_dispatch).
+# Нужен, чтобы по кнопке прогнать всё/heavy/прочие маркеры
+on:
+  workflow_dispatch:
+    inputs:
+      markers:
+        description: 'pytest -m <your input>(пусто = all, heavy; not heavy; smoke or integration …)'
+        type: string
+        default: ''
+
+concurrency:
+  group: manual-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    uses: ./.github/workflows/_checks.yml
+
+  tests:
+    uses: ./.github/workflows/_tests.yml
+    with:
+      # ручной прогон → всегда все тест-каталоги (changed_only вне PR смысла не имеет:
+      # нет базы для диффа). markers кавычится и подставляется через env → без инъекции.
+      markers: ${{ inputs.markers }}
