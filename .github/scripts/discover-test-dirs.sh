@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 #
 # Когда:   шаг discover tests-джоба, до вычисления затронутого.
-# Зачем:   найти все тест-каталоги репо, не завися от их числа и имён.
+# Зачем:   найти все тест-каталоги (корень + сервисы), не завися от их числа и имён.
 # Вход:    нет (работает от корня репозитория).
 # Алгоритм:
 #   тест-каталог = папка с pyproject.toml, где есть [project] или [tool.pytest.*];
-#   ищем в: корне (.), каждом services/<имя>/, каждом прочем верхнеуровневом
-#   каталоге (e2e/, integration/, tests/ …). .venv/node_modules/docs/скрытые — мимо.
-# Выход:   JSON-массив путей тест-каталогов, напр. [".","services/auth","e2e"].
+#   берём корень (.) + по одному ближайшему в каждом services/<имя>/.
+# Выход:   JSON-массив путей тест-каталогов, напр. [".","services/auth"].
 set -euo pipefail
 
 # тест-каталог = pyproject с [project] или pytest-конфигом ([tool.pytest.*])
@@ -37,23 +36,16 @@ nearest_test_dir() {
 
 dirs=()
 
-# корень
+# корневое окружение
 if [ -f pyproject.toml ] && is_test_dir pyproject.toml; then
   dirs+=(".")
 fi
 
-# сервисы: по одному тест-каталогу на services/<имя>/
+# по одному тест-каталогу на services/<имя>/
 if [ -d services ]; then
   for svc in services/*/; do
     d=$(nearest_test_dir "$svc"); [ -n "$d" ] && dirs+=("$d")
   done
 fi
-
-# прочие верхнеуровневые каталоги (e2e/, integration/, tests/, libs/ …)
-for top in */; do
-  [ -d "$top" ] || continue
-  case "$top" in services/|docs/) continue;; esac
-  d=$(nearest_test_dir "$top"); [ -n "$d" ] && dirs+=("$d")
-done
 
 json_array ${dirs[@]+"${dirs[@]}"}
