@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+# Только самый свежий пуш в main доводится до конца: медленный build старого
+# коммита отменяется и не может перезаписать :latest ПОЗЖЕ нового (иначе dev
+# откатился бы на старый образ). Для dev это «последний коммит побеждает».
+concurrency:
+  group: deploy-dev-pipeline
+  cancel-in-progress: true
+
 jobs:
   plan:
     # build — что пересобирать; deploy — что выкатывать (может быть шире build)

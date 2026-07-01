@@ -1,7 +1,8 @@
 name: Release — promote images & deploy prod
 
 # Триггер: тег v*.
-# Шаги: prepare (tag == HEAD main + фиксируем :latest в digest) → tests →
+# Шаги: prepare (tag == HEAD main + пин образов в digest: изменённое по :<sha>,
+#        остальное по :latest) → tests →
 # promote (digest → :vX + :stable) → deploy-prod.
 
 on:
@@ -46,19 +47,39 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - id: pin
-        # «Фото» образов: :latest -> неизменяемый digest, встык за проверкой тега.
-        # Дальше релиз адресует только digest → перезапись :latest на dev не влияет.
+        # «Фото» образов в неизменяемый digest, встык за проверкой тега; дальше релиз
+        # адресует только digest. Источник digest:
+        #   сервис изменён релизным коммитом → его образ = :<sha> (пушит dev-build того
+        #     же мержа). Берём :<sha>, а НЕ плавающий :latest, который в момент релиза
+        #     мог ещё не обновиться. Нет :<sha> → dev-build не закончился → падаем.
+        #   сервис на HEAD не менялся → :latest авторитетен и сейчас не пересобирается.
         env:
           SERVICES: ${{ steps.s.outputs.services }}
+          SHA: ${{ github.sha }}
         run: |
           PREFIX=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          # что пересобрал релизный коммит (его авторитетный образ = :<sha>)
+          if git rev-parse -q --verify "HEAD^" >/dev/null 2>&1; then
+            changed=$(bash .github/scripts/services.sh changed "HEAD^" "HEAD")
+          else
+            changed="$SERVICES"   # нет родителя → считаем изменёнными все (fail closed)
+          fi
           map='{}'
           for svc in $(printf '%s' "$SERVICES" | jq -r '.[]'); do
-            if ! digest=$(docker buildx imagetools inspect "$PREFIX/$svc:latest" --format '{{.Manifest.Digest}}' 2>/dev/null); then
-              echo "::error::образ $PREFIX/$svc:latest недоступен: нет в реестре или нет прав. Релиз промоутит готовое, а не пересобирает."
+            if printf '%s' "$changed" | jq -e --arg s "$svc" 'index($s) != null' >/dev/null; then
+              ref="$PREFIX/$svc:$SHA"; src="sha"
+            else
+              ref="$PREFIX/$svc:latest"; src="latest"
+            fi
+            if ! digest=$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null); then
+              if [ "$src" = "sha" ]; then
+                echo "::error::образ $ref не найден: dev-build релизного коммита ещё не закончился. Дождись сборки и перезапусти release (Actions → Re-run jobs)."
+              else
+                echo "::error::образ $ref недоступен: нет в реестре или нет прав. Релиз промоутит готовое, а не пересобирает."
+              fi
               exit 1
             fi
-            echo "pin $svc -> $digest"
+            echo "pin $svc ($src) -> $digest"
             map=$(jq -c --arg s "$svc" --arg d "$digest" '. + {($s): $d}' <<<"$map")
           done
           echo "digests=$map" >> "$GITHUB_OUTPUT"
