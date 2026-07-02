@@ -1,14 +1,8 @@
 """Codex PR conversational answerer — replies to `@codex <question>`.
 
-Two modes (set by MODE env):
-  issue  — `@codex …` in the PR conversation; reads PR meta + diff + the
-           issue-comment thread; posts a PR comment (placeholder -> edited).
-  inline — `@codex …` as a reply under an inline review comment (e.g. under a
-           Codex finding); reads the code hunk + that review thread; replies IN the
-           thread (placeholder reply -> edited).
-
-GH_TOKEN is stripped from the codex subprocess; the answer is read via `codex exec -o`
-(final message only). Question text comes via env (no shell injection).
+Modes (MODE env): `issue` — reply in the PR conversation (PR meta + diff + comment
+thread → PR comment); `inline` — reply under an inline review comment (code hunk + that
+thread → threaded reply). Both post a placeholder, then edit it with the answer.
 
 Env: GH_TOKEN, REPO, PR_NUMBER, QUESTION, MODE; inline also: COMMENT_ID.
 """
@@ -44,13 +38,8 @@ modify any files. Output plain markdown — published as-is as a threaded reply.
 
 
 def ask_codex(prompt: str) -> str:
-    """Запустить codex exec и вернуть ТОЛЬКО финальное сообщение (через -o).
-
-    GH_TOKEN вычищаем из окружения подпроцесса: codex обрабатывает недоверенный текст
-    (дифф/комментарии автора PR) — секрет ему не нужен. Промпт уходит через stdin
-    (`codex exec -`), а не аргументом: большой контекст в argv упёрся бы в ARG_MAX
-    (`Argument list too long`).
-    """
+    """codex exec → финальное сообщение (через -o). Промпт через stdin (`-`), не argv:
+    большой контекст в argv упёрся бы в ARG_MAX. GH_TOKEN не отдаём tool-capable CLI."""
     codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
     with tempfile.NamedTemporaryFile("w+", suffix=".md", delete=False, encoding="utf-8") as tf:
         out_path = tf.name
@@ -66,7 +55,6 @@ def ask_codex(prompt: str) -> str:
 
 
 def pr_meta_and_diff(repo: str, pr: str, token: str) -> tuple[dict, str]:
-    """Мета PR + дифф ветки относительно базы (для предметных ответов по коду)."""
     _, info = gh_api("GET", f"/repos/{repo}/pulls/{pr}", token)
     base = (info.get("base") or {}).get("ref", "")
     diff = ""
@@ -78,7 +66,6 @@ def pr_meta_and_diff(repo: str, pr: str, token: str) -> tuple[dict, str]:
 
 
 def answer_issue(repo: str, pr: str, token: str, question: str) -> None:
-    """`@codex …` в общем треде PR → коммент (заглушка → обновление)."""
     progress_id = post_comment(repo, pr, token, "🤖 **Codex** — думаю над ответом… ⏳")
 
     def finalize(text: str) -> None:
@@ -116,21 +103,16 @@ def answer_issue(repo: str, pr: str, token: str, question: str) -> None:
 
 
 def reply_review_comment(repo: str, pr: str, token: str, comment_id: int, body: str) -> int | None:
-    """Создать reply в inline-треде. Возвращает id ответа (или None)."""
     status, data = gh_api("POST", f"/repos/{repo}/pulls/{pr}/comments/{comment_id}/replies", token, {"body": body})
     return data.get("id") if status < 300 else None
 
 
 def edit_review_comment(repo: str, token: str, comment_id: int, body: str) -> None:
-    """Перезаписать тело inline review-комментария."""
     gh_api("PATCH", f"/repos/{repo}/pulls/comments/{comment_id}", token, {"body": body})
 
 
 def review_thread(repo: str, pr: str, token: str, comment_id: int) -> tuple[dict | None, list]:
-    """Корень и упорядоченная ветка inline-треда, содержащего comment_id.
-
-    Треды восстанавливаем по in_reply_to_id (per_page=100 — длиннее редкость).
-    """
+    """Корень и упорядоченная ветка inline-треда с comment_id (по in_reply_to_id)."""
     _, allc = gh_api("GET", f"/repos/{repo}/pulls/{pr}/comments?per_page=100", token)
     allc = allc if isinstance(allc, list) else []
     by_id = {c["id"]: c for c in allc}
@@ -154,7 +136,6 @@ def review_thread(repo: str, pr: str, token: str, comment_id: int) -> tuple[dict
 
 
 def answer_inline(repo: str, pr: str, token: str, question: str, comment_id: int) -> None:
-    """`@codex …` под inline-находкой → reply в том же треде (заглушка → обновление)."""
     progress_id = reply_review_comment(repo, pr, token, comment_id, "🤖 **Codex** — думаю над ответом… ⏳")
 
     def finalize(text: str) -> None:
