@@ -1,11 +1,19 @@
 """Codex PR reviewer — posts a live status comment, then fills it with the verdict.
 
-Flow: post placeholder → diff PR against base → `codex exec` for JSON findings →
-keep only findings anchorable to a diff line → post one PR review (verdict+summary in
-body, inline threads) and drop the placeholder, or edit the placeholder into the summary
-if there are no inline findings. Any parse/post failure degrades into the summary comment.
+Flow:
+  1. immediately post a placeholder comment ("анализирую… ⏳") so it's visible the job started;
+  2. compute the PR diff against the base branch;
+  3. ask `codex exec` for structured JSON findings (subscription auth on the runner);
+  4. keep only findings that land on a line actually present in the diff;
+  5. if there are inline findings, post ONE PR review carrying the verdict/summary in its
+     body plus the inline threads, then delete the placeholder (single surface). With no
+     inline findings, edit the placeholder into the summary instead.
 
-Env: GH_TOKEN, REPO (owner/repo), PR_NUMBER, BASE_REF, HEAD_SHA
+Findings that can't be anchored to a diff line, and any parse/post failure,
+degrade into the summary comment — the job never hard-fails on review noise.
+
+Env (provided by the workflow):
+  GH_TOKEN, REPO (owner/repo), PR_NUMBER, BASE_REF, HEAD_SHA
 """
 
 from __future__ import annotations
@@ -22,8 +30,9 @@ API = "https://api.github.com"
 SEV_EMOJI = {"high": "🔴", "medium": "🟡", "low": "🟢"}
 MAX_DIFF = 60000  # держит вход в пределах контекста модели
 
-# Добавляется в промпт ТОЛЬКО при поднятом worktree — иначе codex примет файлы
-# default-ветки за PR и выдаст ревью не по тому коду.
+# Префикс с контекстом ветки добавляется ТОЛЬКО когда worktree реально поднят
+# (codex запущен в коде PR). Иначе промпт не должен заявлять о доступности файлов —
+# иначе codex прочитает файлы default-ветки, приняв их за PR (вводящее в заблуждение ревью).
 PR_CONTEXT_NOTE = (
     "The full PR branch is checked out in your working directory — read any files you "
     "need for context (imports, callers, type definitions, neighbouring code).\n\n"
@@ -81,15 +90,18 @@ def gh_api(method: str, path: str, token: str, payload: dict | None = None) -> t
 
 
 def post_comment(repo: str, pr: str, token: str, body: str) -> int | None:
+    """Создать issue-коммент на PR. Возвращает его id (или None при ошибке)."""
     status, data = gh_api("POST", f"/repos/{repo}/issues/{pr}/comments", token, {"body": body})
     return data.get("id") if status < 300 else None
 
 
 def edit_comment(repo: str, token: str, comment_id: int, body: str) -> None:
+    """Перезаписать тело ранее созданного issue-коммента."""
     gh_api("PATCH", f"/repos/{repo}/issues/comments/{comment_id}", token, {"body": body})
 
 
 def delete_comment(repo: str, token: str, comment_id: int) -> None:
+    """Удалить issue-коммент (заглушку), когда итог уезжает в body ревью."""
     gh_api("DELETE", f"/repos/{repo}/issues/comments/{comment_id}", token)
 
 
@@ -121,6 +133,7 @@ def commentable_lines(diff: str) -> dict[str, set[int]]:
                 new_ln += 1
             elif raw.startswith(" "):
                 new_ln += 1
+            # '-' deletions and '\\' markers don't advance the new-file counter
     return lines
 
 
@@ -151,26 +164,31 @@ def main() -> None:
     token, repo, pr = env("GH_TOKEN"), env("REPO"), env("PR_NUMBER")
     base, head_sha = os.environ.get("BASE_REF"), os.environ.get("HEAD_SHA")
     if not base or not head_sha:
-        # путь «по комментарию» не несёт base/head в событии
+        # путь «по комментарию» не несёт base/head в событии — берём из API
         _, info = gh_api("GET", f"/repos/{repo}/pulls/{pr}", token)
         base = base or info["base"]["ref"]
         head_sha = head_sha or info["head"]["sha"]
 
+    # Сразу постим коммент-заглушку — сигнал, что ревью стартовало; его же обновим вердиктом.
     progress_id = post_comment(repo, pr, token, "🤖 **Codex review** — анализирую изменения, подождите… ⏳")
 
     def finalize(text: str) -> None:
+        """Финальный результат — поверх заглушки (или новым комментом, если её создать не вышло)."""
         if progress_id is not None:
             edit_comment(repo, token, progress_id, text)
         else:
             post_comment(repo, pr, token, text)
 
-    # PR-head берём через refs/pull/<n>/head — скрипт исполняется из default-ветки.
+    # Диффим по ref'ам, не по рабочему дереву: скрипт запускается из ветки,
+    # где он лежит (main), а PR-head берём явно через refs/pull/<n>/head.
     fetch_base = subprocess.run(["git", "fetch", "origin", base], capture_output=True, text=True)
     fetch_head = subprocess.run(["git", "fetch", "origin", f"refs/pull/{pr}/head"], capture_output=True, text=True)
     if fetch_base.returncode or fetch_head.returncode:
+        # fetch упал — НЕ выдаём ложное «изменений нет»: сообщаем и падаем, чтобы дефект был виден.
         err = (fetch_base.stderr + fetch_head.stderr).strip()[:1000]
         finalize(f"🤖 Codex review: не смог получить изменения (git fetch упал).\n\n```\n{err}\n```")
         sys.exit("git fetch failed")
+    # Сгенерённые/шумные файлы не ревьюятся, но раздувают вход — исключаем из дифа.
     diff_pathspec = [
         ".",
         ":(exclude)**/*.lock",
@@ -184,22 +202,31 @@ def main() -> None:
         finalize(f"🤖 Codex review: изменений относительно `{base}` нет.")
         return
     if len(diff) > MAX_DIFF:
+        # строки за отсечкой теряют inline-привязку (уедут в summary), но код codex дочитает из worktree
         diff = diff[:MAX_DIFF] + "\n\n[diff обрезан по лимиту размера; полный код ветки доступен в рабочей папке]"
 
-    codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}  # секрет tool-capable CLI не нужен
+    # codex обрабатывает недоверенный код PR. Токен ему не нужен — убираем GH_TOKEN из
+    # окружения подпроцесса, чтобы не отдавать секрет tool-capable CLI.
+    codex_env = {k: v for k, v in os.environ.items() if k != "GH_TOKEN"}
 
-    # Код ветки PR — в detached worktree на чтение; на self-hosted раннере нельзя
-    # исполнять CI из присланного кода. Раннер персистентный — чистим остаток прошлого прогона.
+    # Полный код ветки PR — в отдельный detached worktree, для codex ТОЛЬКО на чтение.
+    # Главный чекаут (= default branch, откуда исполняется ЭТОТ скрипт) не трогаем: на
+    # self-hosted раннере недопустимо выполнять CI-логику из присланного контрибьютором
+    # кода. Раннер персистентный — сначала чистим остаток от возможного упавшего прогона.
     wt = "_pr_src"
     subprocess.run(["git", "worktree", "remove", "--force", wt], capture_output=True, text=True)
     subprocess.run(["git", "worktree", "prune"], capture_output=True, text=True)
     add = subprocess.run(["git", "worktree", "add", "--detach", wt, "FETCH_HEAD"], capture_output=True, text=True)
     pr_cwd = wt if add.returncode == 0 else None
     if pr_cwd is None:
+        # worktree не встал — деградируем к старому поведению (контекст = только дифф).
         print(f"worktree add failed, fallback diff-only: {add.stderr.strip()[:300]}")
 
-    # stdin, не argv: большой дифф в argv упирается в ARG_MAX (E2BIG). --sandbox read-only
-    # обезвреживает prompt-injection из кода PR.
+    # --sandbox read-only: даже успешная prompt-injection из кода PR не запишет файлы и не
+    # уйдёт в сеть. --cd: рабочая папка codex = код ветки PR (или main, если worktree не встал).
+    # Префикс о доступности файлов даём ТОЛЬКО при поднятом worktree — иначе промпт врал бы
+    # codex'у про PR-контекст и тот ревьюил бы файлы default-ветки как будто это PR.
+    # Промпт с дифом уходит через stdin (`codex exec -`): дифф в argv упёрся бы в ARG_MAX.
     codex_argv = ["codex", "exec", "--sandbox", "read-only"]
     prompt = PROMPT + diff
     if pr_cwd:
@@ -207,7 +234,7 @@ def main() -> None:
         prompt = PR_CONTEXT_NOTE + prompt
     try:
         raw = run(*codex_argv, "-", input=prompt, timeout=600, env=codex_env)
-    except Exception as exc:  # noqa: BLE001 — сбой codex не должен оставить заглушку висеть
+    except Exception as exc:  # noqa: BLE001 — любой сбой codex не должен оставить заглушку висеть
         finalize(f"🤖 Codex review: не удалось выполнить codex.\n\n```\n{str(exc)[:1000]}\n```")
         sys.exit(f"codex exec failed: {exc}")
     finally:
@@ -241,24 +268,34 @@ def main() -> None:
 
     summary = build_summary(verdict, parsed.get("summary", ""), orphans)
 
-    # Inline-замечания требуют review; вердикт+summary кладём в его body и удаляем заглушку.
-    # Без inline-находок ревью не создаём — итог пишем в заглушку.
+    # Inline-замечания по строкам — отдельным review (без них review создавать нельзя).
+    # Чтобы итог жил в ОДНОМ месте, кладём вердикт+summary прямо в body ревью, а
+    # коммент-заглушку удаляем. Если inline-находок нет (или привязка отклонена) —
+    # ревью не создаём и пишем итог в заглушку, как раньше.
     review_status = 200
     if inline:
-        review = {"commit_id": head_sha, "body": summary, "event": "COMMENT", "comments": inline}
+        review = {
+            "commit_id": head_sha,
+            "body": summary,
+            "event": "COMMENT",
+            "comments": inline,
+        }
         review_status, _ = gh_api("POST", f"/repos/{repo}/pulls/{pr}/reviews", token, review)
 
     if inline and review_status < 300:
+        # итог уехал в body ревью → заглушка больше не нужна
         if progress_id is not None:
             delete_comment(repo, token, progress_id)
         print(f"posted review: {len(inline)} inline, {len(orphans)} in summary, verdict={verdict}")
     elif review_status >= 300:
+        # привязка inline отклонена — складываем все находки в итоговый коммент
         all_findings = orphans + [
             {"path": c["path"], "line": c["line"], "severity": "", "category": "", "comment": c["body"]} for c in inline
         ]
         finalize(build_summary(verdict, parsed.get("summary", ""), all_findings))
         print(f"reviews API returned {review_status}; put everything in summary comment")
     else:
+        # inline-находок нет — итог только в комменте
         finalize(summary)
         print(f"no inline findings; summary comment only, verdict={verdict}")
 
