@@ -4,6 +4,14 @@ name: Codex commands (on demand)
 #   "@codex review"   — ревью PR;
 #   "@codex <вопрос>" — ответ Codex (любой @codex, кроме "@codex review");
 #     работает в общем треде и как reply под inline-находкой ревью.
+#
+# Авторизация автора коммента вынесена в job `gate`. НЕ полагаемся напрямую на
+# github.event.comment.author_association: в payload события
+# pull_request_review_comment оно НЕ кредитует приватное членство в орге и
+# отдаёт CONTRIBUTOR/NONE, из-за чего inline-джоба ошибочно скипалась у
+# участников с приватным членством, не добавленных ПРЯМЫМИ коллабораторами
+# (issue_comment при этом отдаёт MEMBER и работал). Гейт проверяет эффективные
+# права актора через API — одинаково надёжно для обоих событий.
 
 on:
   issue_comment:
@@ -12,12 +20,46 @@ on:
     types: [created]
 
 jobs:
-  codex-review:
-    # Триггер: PR-коммент "@codex review" от участника репо (OWNER/MEMBER/COLLABORATOR).
+  gate:
+    # Единый гейт авторизации @codex-коммента. Разрешаем, если author_association
+    # уже в allowlist (быстрый путь: issue_comment / публичные участники / прямые
+    # коллабораторы) ИЛИ у актора реальные права admin/write по репо (надёжный
+    # путь через API — кредитует приватное org-членство, невидимое в
+    # pull_request_review_comment payload).
     if: >
+      contains(github.event.comment.body, '@codex') &&
+      (github.event.issue.pull_request || github.event_name == 'pull_request_review_comment')
+    runs-on: [self-hosted, codex]
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      allowed: ${{ steps.gate.outputs.allowed }}
+    steps:
+      - id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.event.comment.user.login }}
+          ASSOC: ${{ github.event.comment.author_association }}
+        run: |
+          allowed=false
+          case "$ASSOC" in OWNER|MEMBER|COLLABORATOR) allowed=true ;; esac
+          if [ "$allowed" != true ]; then
+            perm=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.permission' 2>/dev/null || echo none)
+            echo "api permission for $ACTOR: $perm"
+            case "$perm" in admin|maintain|write) allowed=true ;; esac
+          fi
+          echo "actor=$ACTOR assoc=$ASSOC allowed=$allowed"
+          echo "allowed=$allowed" >> "$GITHUB_OUTPUT"
+
+  codex-review:
+    # Триггер: PR-коммент "@codex review" от авторизованного актора.
+    needs: gate
+    if: >
+      needs.gate.outputs.allowed == 'true' &&
       github.event.issue.pull_request &&
-      contains(github.event.comment.body, '@codex review') &&
-      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      contains(github.event.comment.body, '@codex review')
     runs-on: [self-hosted, codex]
     timeout-minutes: 20
     permissions:
@@ -37,12 +79,13 @@ jobs:
         run: python3 .github/scripts/codex_review.py
 
   codex-answer:
-    # Триггер: "@codex <вопрос>" (кроме "@codex review") от участника репо.
+    # Триггер: "@codex <вопрос>" (кроме "@codex review") в общем треде PR.
+    needs: gate
     if: >
+      needs.gate.outputs.allowed == 'true' &&
       github.event.issue.pull_request &&
       contains(github.event.comment.body, '@codex') &&
-      !contains(github.event.comment.body, '@codex review') &&
-      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      !contains(github.event.comment.body, '@codex review')
     runs-on: [self-hosted, codex]
     timeout-minutes: 20
     permissions:
@@ -64,12 +107,13 @@ jobs:
         run: python3 .github/scripts/codex_answer.py
 
   codex-answer-inline:
-    # Триггер: "@codex <вопрос>" (кроме "@codex review") как reply под inline-находкой ревью.
+    # Триггер: "@codex <вопрос>" как reply под inline-находкой ревью.
+    needs: gate
     if: >
+      needs.gate.outputs.allowed == 'true' &&
       github.event_name == 'pull_request_review_comment' &&
       contains(github.event.comment.body, '@codex') &&
-      !contains(github.event.comment.body, '@codex review') &&
-      contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)
+      !contains(github.event.comment.body, '@codex review')
     runs-on: [self-hosted, codex]
     timeout-minutes: 20
     permissions:
